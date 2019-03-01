@@ -15,9 +15,12 @@ u-blox M8N GPS module
 
 This project uses u-blox AssistNow services, and requires and account and authorization token from u-blox. To apply for an account register [here](http://www.u-blox.com/services-form.html). 
 <br>
+<br>
 This project has been written using [VS code plug-in](https://github.com/electricimp/vscode). All configuration settings and pre-processed files have been excluded. Follow the instructions [here](https://github.com/electricimp/vscode#installation) to install the plug-in and create a project. 
 <br>
+<br>
 Replace the **src** folder in your newly created project with the found in this repository
+<br>
 <br>
 Update settings/imp.config device_code, agent_code, and builderSettings to the following:
 
