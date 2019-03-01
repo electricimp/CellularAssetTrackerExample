@@ -5,18 +5,16 @@
 #require "UbxMsgParser.lib.nut:2.0.0"
 #require "LIS3DH.device.lib.nut:2.0.2"
 #require "SPIFlashFileSystem.device.lib.nut:2.0.0"
-// #require "ConnectionManager.lib.nut:3.1.0"
+#require "ConnectionManager.lib.nut:3.1.1"
 #require "MessageManager.lib.nut:2.4.0"
+#require "UBloxAssistNow.device.lib.nut:0.1.0"
 
 // Battery Charger/Fuel Gauge Libraries
 #require "MAX17055.device.lib.nut:1.0.1"
 #require "BQ25895M.device.lib.nut:1.0.0"
 
 // Beta Libraries (unpublished versions)
-@include "github:electricimp/UBloxAssistNow/DeviceLibrary/UBloxAssistNow.device.lib.nut@develop"
-@include "github:electricimp/ConnectionManager/ConnectionManager.lib.nut@develop"
 @include "github:electricimp/LPDeviceManager/LPDeviceManager.device.lib.nut@develop"
-// @include __PATH__+"/MyLPDevMngr.device.nut"
 
 // Supporting files
 // NOTE: Order of files matters do NOT change unless you know how it will effect 
@@ -94,9 +92,10 @@ class MainController {
 
         // Initialize SPI storage class
         persist = Persist();
-        // To override stored next connect (ie if you have updated the CHECK_IN_TIME_SEC)
-        local now = time();
-        persist.setWakeTime(now + CHECK_IN_TIME_SEC);
+        // NOTE: If you update CHECK_IN_TIME_SEC uncomment the 2 lines below to update the 
+        // next wake time.
+        // local now = time();
+        // persist.setWakeTime(now + CHECK_IN_TIME_SEC);
 
         // Initialize Low Power Manager Library - this registers callbacks for each of the
         // different wake reasons (ie, onTimer, onInterrupt, defaultOnWake, etc);

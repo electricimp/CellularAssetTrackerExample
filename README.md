@@ -19,10 +19,10 @@ This project uses u-blox AssistNow services, and requires and account and author
 This project has been written using [VS code plug-in](https://github.com/electricimp/vscode). All configuration settings and pre-processed files have been excluded. Follow the instructions [here](https://github.com/electricimp/vscode#installation) to install the plug-in and create a project. 
 <br>
 <br>
-Replace the **src** folder in your newly created project with the found in this repository
+Replace the **src** folder in your newly created project with the **src** folder found in this repository
 <br>
 <br>
-Update settings/imp.config device_code, agent_code, and builderSettings to the following:
+Update settings/imp.config "device_code", "agent_code", and "builderSettings" to the following (updating the UBLOX_ASSISTNOW_TOKEN with your u-blox Assist Now authorization token):
 
 ```
     "device_code": "src/device/Main.device.nut"
@@ -40,3 +40,11 @@ For development purposes uart logging is recommended in order to see logs when d
 ## Customization
 
 Settings are all stored as constants. Modify to customize the application.
+
+## Measurements
+
+Rough wake timings base on code committed on 3/1/18 under good cellular conditions and in a location that can get a GPS fix.
+
+- Wake with no connections ~650-655 ms
+- Wake and connection ~40s
+- Cold boot (connection established before code starts) ~20-30s

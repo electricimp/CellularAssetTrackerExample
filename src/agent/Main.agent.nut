@@ -2,8 +2,7 @@
 
 // Libraries 
 #require "MessageManager.lib.nut:2.4.0"
-
-@include "github:electricimp/UBloxAssistNow/AgentLibrary/UBloxAssistNow.agent.lib.nut@develop"
+#require "UBloxAssistNow.agent.lib.nut:1.0.0"
 
 // Supporting files
 @include __PATH__+"/../shared/Logger.shared.nut"
