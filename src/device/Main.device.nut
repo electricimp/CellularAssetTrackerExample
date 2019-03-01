@@ -34,9 +34,9 @@
 // -----------------------------------------------------------------------
 
 // Wake every x seconds to check if report should be sent 
-const CHECK_IN_TIME_SEC  = 86400; // 60s * 60m * 24h 
+const CHECK_IN_TIME_SEC  = 600; // 86400; // 60s * 60m * 24h 
 // Wake every x seconds to send a report, regaurdless of check results
-const REPORT_TIME_SEC    = 604800; // 60s * 60m * 24h * 7d
+const REPORT_TIME_SEC    = 3600; // 604800; // 60s * 60m * 24h * 7d
 
 // Force in Gs that will trigger movement interrupt
 const MOVEMENT_THRESHOLD = 0.05;
@@ -257,8 +257,10 @@ class MainController {
     // Create and send device status report to agent
     function sendReport() {
         local report = {
-            "movementDetected" : persist.getMoveDetected(),
+            "msSinceBoot" : bootTime,
+            "ts"          : time()
         }
+        if (persist.getMoveDetected()) report.movement <- true;
         if (battStatus != null) report.battStatus <- battStatus;
         if (fix != null) report.fix <- fix;
 
