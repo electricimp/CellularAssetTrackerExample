@@ -33,6 +33,9 @@ Update settings/imp.config device_code, agent_code, and builderSettings to the f
         }
     }
 ```
+<br>
+<br>
+For development purposes uart logging is recommended in order to see logs when device is running offline. Current code uses hardware.uartDCAB (A: RTS, B: CTS, C: RX, D: TX) for logging. 
 
 ## Customization
 
