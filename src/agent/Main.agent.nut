@@ -43,23 +43,23 @@ class MainController {
         ::debug(http.jsonencode(report));
         // Report Structure (movement, fix and battStatus only included if data was collected)
             // { 
-            //   "msSinceBoot" : 37997,             // Always included
-            //   "ts"          : 1551410644,        // Always included, timestamp when report sent
-            //   "movement"    : true,              // Only included if movement event occured
-            //   "fix"         : {                  // Only included if fix was obtained
-            //       "msToFix"    : 18.197001,      // ms from boot til accurate fix 
-            //       "fixType"    : 3,              // type of fix
-            //       "msTo1stFix" : 9.882,          // ms from boot til first fix (not accurate)
-            //       "numSats"    : 9,              // number of satellites used in fix
-            //       "lon"        : "-122.1022211", // latitude
-            //       "lat"        : "37.3954374",   // longitude
-            //       "time"       : "2019:03:01",   // time from GPS message
-            //       "accuracy"   : 9.9960003       // fix accuracy
-            //   }, 
-            //   "battStatus"  : {                  // Only included if info returned from fuel gauge
-            //       "percent"  : 94.578125, 
-            //       "capacity" : 2282 
-            //   } 
+            //     "fix" : {                            // Only included if fix was obtained
+            //         "accuracy": 9.3620005,           // fix accuracy
+            //         "secToFix": 36.978001,           // sec from boot til accurate fix 
+            //         "lat": "37.3957215",             // latitude
+            //         "numSats": 10,                   // number of satellites used in fix
+            //         "lon": "-122.1022552",           // longitude
+            //         "fixType": 3,                    // type of fix
+            //         "secTo1stFix": 9.1499996,        // ms from boot til first fix (not accurate)
+            //         "time": "2019-03-01T19:10:32Z"   // time from GPS message
+            //     }, 
+            //     "battStatus": {                      // Only included if info returned from fuel gauge
+            //         "percent": 85.53125, 
+            //         "capacity": 2064 
+            //     }, 
+            //     "ts": 1551467430,                    // Always included, timestamp when report sent
+            //     "secSinceBoot": 35126,               // Always included
+            //     "movement" : true                    // Only included if movement event occured
             // }
 
         // TODO: Send device data to cloud service

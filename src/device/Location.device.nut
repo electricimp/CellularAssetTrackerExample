@@ -144,7 +144,7 @@ class Location {
     function _checkFix(payload) {
         // Check fixtype
         local fixType = payload.fixType;
-        local timeStr = format("%04d-%02d-%02dT%02d:%02d:%02dZ", payload.year + 2000, payload.month, payload.day, payload.hour, payload.min, payload.sec);
+        local timeStr = format("%04d-%02d-%02dT%02d:%02d:%02dZ", payload.year, payload.month, payload.day, payload.hour, payload.min, payload.sec);
 
         if (fixType >= FIX_TYPE.FIX_3D) {
             // Get timestamp for this fix
@@ -154,12 +154,12 @@ class Location {
             if (gpsFix == null) {
                 // And record time to first fix
                 gpsFix = {
-                    "msTo1stFix" : fixTime
+                    "secTo1stFix" : fixTime
                 };
             }
 
             // Add/Update fix report values
-            gpsFix.msToFix <- fixTime;
+            gpsFix.secToFix <- fixTime;
             gpsFix.fixType <- fixType;
             gpsFix.numSats <- payload.numSV;
             gpsFix.lon <- UbxMsgParser.toDecimalDegreeString(payload.lon);

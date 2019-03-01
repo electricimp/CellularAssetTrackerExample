@@ -34,9 +34,9 @@
 // -----------------------------------------------------------------------
 
 // Wake every x seconds to check if report should be sent 
-const CHECK_IN_TIME_SEC  = 600; // 86400; // 60s * 60m * 24h 
+const CHECK_IN_TIME_SEC  = 86400; // 60s * 60m * 24h 
 // Wake every x seconds to send a report, regaurdless of check results
-const REPORT_TIME_SEC    = 3600; // 604800; // 60s * 60m * 24h * 7d
+const REPORT_TIME_SEC    = 604800; // 60s * 60m * 24h * 7d
 
 // Force in Gs that will trigger movement interrupt
 const MOVEMENT_THRESHOLD = 0.05;
@@ -45,10 +45,10 @@ const LOCATION_ACCURACY  = 10;
 // Constant used to validate imp's timestamp 
 const VALID_TS_YEAR      = 2019;
 // Maximum time to stay awake
-const MAX_WAKE_TIME      = 90;
+const MAX_WAKE_TIME      = 60;
 // Maximum time to wait for GPS to get a fix, before trying to send report
 // NOTE: This should be less than the MAX_WAKE_TIME
-const GPS_TIMEOUT        = 85; 
+const GPS_TIMEOUT        = 55; 
 
 class MainController {
 
@@ -257,9 +257,10 @@ class MainController {
     // Create and send device status report to agent
     function sendReport() {
         local report = {
-            "msSinceBoot" : bootTime,
-            "ts"          : time()
+            "secSinceBoot" : (hardware.millis() - bootTime) / 1000.0,
+            "ts"           : time()
         }
+        // TODO: Decide if movement should always be included or only if true
         if (persist.getMoveDetected()) report.movement <- true;
         if (battStatus != null) report.battStatus <- battStatus;
         if (fix != null) report.fix <- fix;
@@ -428,11 +429,10 @@ class MainController {
         ::debug("Time since code started: " + (now - bootTime) + "ms");
         ::debug("Going to sleep...");
 
-        // Give time for uart logs to complete while in development
-        // In production remove the wakeup delay and just sleep
-        imp.wakeup(2, function() {
+        // While in development, may want to use wakeup to give time for uart logs to complete 
+        // imp.wakeup(2, function() {
             (sleep != null) ? sleep() : lpm.sleepFor(getSleepTimer());
-        }.bindenv(this))
+        // }.bindenv(this))
     }
 
     // Helpers
