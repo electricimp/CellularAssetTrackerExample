@@ -34,8 +34,7 @@ Update settings/imp.config "device_code", "agent_code", and "builderSettings" to
     }
 ```
 <br>
-<br>
-For development purposes uart logging is recommended in order to see logs when device is running offline. Current code uses hardware.uartDCAB (A: RTS, B: CTS, C: RX, D: TX) for logging. 
+For development purposes uart logging is recommended to see offline device logs. Current code uses hardware.uartDCAB (A: RTS, B: CTS, C: RX, D: TX) for logging. 
 
 ## Customization
 
@@ -48,3 +47,7 @@ Rough wake timings base on code committed on 3/1/18 under good cellular conditio
 - Wake with no connections ~650-655 ms
 - Wake and connection ~40s
 - Cold boot (connection established before code starts) ~20-30s
+
+# License
+
+Code licensed under the [MIT License](./LICENSE).

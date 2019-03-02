@@ -1,4 +1,28 @@
-// Device Application
+// MIT License
+
+// Copyright 2019 Electric Imp
+
+// SPDX-License-Identifier: MIT
+
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+
+// The above copyright notice and this permission notice shall be
+// included in all copies or substantial portions of the Software.
+
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO
+// EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES
+// OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+// OTHER DEALINGS IN THE SOFTWARE.
+
+// Device Main Application File
 
 // Libraries 
 #require "UBloxM8N.device.lib.nut:1.0.1"
@@ -8,7 +32,6 @@
 #require "ConnectionManager.lib.nut:3.1.1"
 #require "MessageManager.lib.nut:2.4.0"
 #require "UBloxAssistNow.device.lib.nut:0.1.0"
-
 // Battery Charger/Fuel Gauge Libraries
 #require "MAX17055.device.lib.nut:1.0.1"
 #require "BQ25895M.device.lib.nut:1.0.0"
@@ -19,13 +42,13 @@
 // Supporting files
 // NOTE: Order of files matters do NOT change unless you know how it will effect 
 // the application
-@include __PATH__+"/Hardware.device.nut"
-@include __PATH__+"/../shared/Logger.shared.nut"
-@include __PATH__+"/../shared/Constants.shared.nut"
-@include __PATH__+"/Persist.device.nut"
-@include __PATH__+"/Location.device.nut"
-@include __PATH__+"/Motion.device.nut"
-@include __PATH__+"/Battery.device.nut"
+@include __PATH__ + "/Hardware.device.nut"
+@include __PATH__ + "/../shared/Logger.shared.nut"
+@include __PATH__ + "/../shared/Constants.shared.nut"
+@include __PATH__ + "/Persist.device.nut"
+@include __PATH__ + "/Location.device.nut"
+@include __PATH__ + "/Motion.device.nut"
+@include __PATH__ + "/Battery.device.nut"
 
 
 // Main Application
@@ -50,13 +73,13 @@ const GPS_TIMEOUT        = 55;
 
 class MainController {
 
-    cm       = null;
-    mm       = null;
-    lpm      = null;
-    move     = null;
-    loc      = null;
-    persist  = null;
-    battery  = null; 
+    cm          = null;
+    mm          = null;
+    lpm         = null;
+    move        = null;
+    loc         = null;
+    persist     = null;
+    battery     = null; 
 
     bootTime    = null;
     fix         = null;
@@ -279,7 +302,7 @@ class MainController {
     // Powers up GPS and starts location message filtering for accurate fix
     function getLocation() {
         PWR_GATE_EN.write(1);
-        loc = Location(bootTime);
+        if (loc == null) loc = Location(bootTime);
         loc.getLocation(LOCATION_ACCURACY, onAccFix.bindenv(this));
     }
 
@@ -288,7 +311,7 @@ class MainController {
         // NOTE: I2C is configured when Motion class is initailized in the 
         // constructor of this class, so we don't need to configure it here.
         // Initialize Battery Monitor without configuring i2c
-        battery = Battery(false);
+        if (battery == null) battery = Battery(false);
         battery.getStatus(onBatteryStatus.bindenv(this));
     }
 
@@ -461,8 +484,8 @@ class MainController {
     // Returns boolean, if the imp module currently has a valid timestamp
     function validTimestamp() {
         local d = date();
-        // If imp doens't have a valid timestamp a timestamp the date 
-        // method returns a year of 2000. Check that the year returned 
+        // If imp doens't have a valid timestamp the date method returns
+        // a year of 2000. Check that the year returned by the date method
         // is greater or equal to VALID_TS_YEAR constant.
         return (d.year >= VALID_TS_YEAR);
     }
