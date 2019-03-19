@@ -438,6 +438,7 @@ class MainController {
             getLocation();
             // Get battery status
             getBattStatus();
+            // TODO: Get sensor readings for report, if desired.
         } else {
             // Go to sleep
             powerDown();
@@ -484,7 +485,7 @@ class MainController {
     // Returns boolean, if the imp module currently has a valid timestamp
     function validTimestamp() {
         local d = date();
-        // If imp doens't have a valid timestamp the date method returns
+        // If imp doesn't have a valid timestamp the date method returns
         // a year of 2000. Check that the year returned by the date method
         // is greater or equal to VALID_TS_YEAR constant.
         return (d.year >= VALID_TS_YEAR);
