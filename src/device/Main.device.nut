@@ -115,10 +115,6 @@ class MainController {
 
         // Initialize SPI storage class
         persist = Persist();
-        // NOTE: If you update CHECK_IN_TIME_SEC uncomment the 2 lines below to update the 
-        // next wake time.
-        // local now = time();
-        // persist.setWakeTime(now + CHECK_IN_TIME_SEC);
 
         // Initialize Low Power Manager Library - this registers callbacks for each of the
         // different wake reasons (ie, onTimer, onInterrupt, defaultOnWake, etc);
@@ -257,8 +253,9 @@ class MainController {
 
         // Enable movement monitor
         move.enable(MOVEMENT_THRESHOLD, onMovement.bindenv(this));
-        // Set report time 
-        updateReportingTime();
+	    // NOTE: overwriteStoredConnectSettings method only needed if CHECK_IN_TIME_SEC 
+        // and/or REPORT_TIME_SEC have been changed
+        overwriteStoredConnectSettings();
 
         // Send report if connected or alert condition noted, then sleep 
         // Set a limit on how long we are connected
@@ -280,10 +277,10 @@ class MainController {
     function sendReport() {
         local report = {
             "secSinceBoot" : (hardware.millis() - bootTime) / 1000.0,
-            "ts"           : time()
+            "ts"           : time(),
+            "movement"     : persist.getMoveDetected()
         }
-        // TODO: Decide if movement should always be included or only if true
-        if (persist.getMoveDetected()) report.movement <- true;
+
         if (battStatus != null) report.battStatus <- battStatus;
         if (fix != null) report.fix <- fix;
 
@@ -319,11 +316,10 @@ class MainController {
     function updateReportingTime() {
         local now = time();
         
-        // Get stored report time
-        local reportTime = persist.getReportTime();
-        // If report time has expired set next report time based on that timestamp, otherwise set the next report time 
-        // using the current time.
-        reportTime = (reportTime == null || now < reportTime) ? now + REPORT_TIME_SEC : reportTime + REPORT_TIME_SEC;
+	    // If report timer expired set based on current time offset with by the boot ts
+        local reportTime = now + REPORT_TIME_SEC - (bootTime / 1000);
+
+        // Update report time if it has changed
         persist.setReportTime(reportTime);
 
         ::debug("Next report time " + reportTime + ", in " + (reportTime - now) + "s");
@@ -333,14 +329,7 @@ class MainController {
         // Ensure only one timer is set
         cancelReportTimer();
         // Start a timer to send report if no GPS fix is found
-        reportTimer = imp.wakeup(GPS_TIMEOUT, function() {
-            ::debug("GPS failed to get a fix. Disabling GPS power."); 
-            PWR_GATE_EN.write(0);    
-
-            // Send report if connection handler has already run
-            // and report has not been sent
-            if (readyToSend) sendReport();   
-        }.bindenv(this)) 
+        reportTimer = imp.wakeup(GPS_TIMEOUT, onReportTimerExpired.bindenv(this)); 
     }
 
     function cancelReportTimer() {
@@ -348,6 +337,17 @@ class MainController {
             imp.cancelwakeup(reportTimer);
             reportTimer = null;
         }
+    }
+
+    // If report timer expires before accurate GPS fix is not found, 
+    // disable GPS power and send report if connected
+    function onReportTimerExpired() {
+        ::debug("GPS failed to get an accurate fix. Disabling GPS power."); 
+        PWR_GATE_EN.write(0);    
+
+         // Send report if connection handler has already run
+        // and report has not been sent
+        if (readyToSend) sendReport();   
     }
 
     // Async Action Handlers 
@@ -416,7 +416,7 @@ class MainController {
         
         // Our timer has expired, update it to next interval
         if (wakeTime == null || now >= wakeTime) {
-            wakeTime = (wakeTime == null) ? now + CHECK_IN_TIME_SEC : wakeTime + CHECK_IN_TIME_SEC;
+            wakeTime = now + CHECK_IN_TIME_SEC - (bootTime / 1000);
             persist.setWakeTime(wakeTime);
         }
 
@@ -452,18 +452,25 @@ class MainController {
         ::debug("Time since code started: " + (now - bootTime) + "ms");
         ::debug("Going to sleep...");
 
-        // While in development, may want to use wakeup to give time for uart logs to complete 
-        // imp.wakeup(2, function() {
-            (sleep != null) ? sleep() : lpm.sleepFor(getSleepTimer());
-        // }.bindenv(this))
+        (sleep != null) ? sleep() : lpm.sleepFor(getSleepTimer());
     }
 
     // Helpers
     // -------------------------------------------------------------
 
+	// Overwrites currently stored wake and report times
+    function overwriteStoredConnectSettings() {
+        local now = time();
+        persist.setWakeTime(now);
+        persist.setReportTime(now);
+    }
+
     // Returns boolean, checks for event(s) or if report time has passed
     function shouldConnect() {
         // Check for events 
+        // Note: We are not currently storing position changes. The assumption
+        // is that if we change position then movement will be detected and trigger
+        // a report to be generated.
         local haveMoved = persist.getMoveDetected();
         ::debug("Movement detected: " + haveMoved);
         if (haveMoved) return true;

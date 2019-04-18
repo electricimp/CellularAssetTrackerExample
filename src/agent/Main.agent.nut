@@ -27,11 +27,13 @@
 // Libraries 
 #require "MessageManager.lib.nut:2.4.0"
 #require "UBloxAssistNow.agent.lib.nut:1.0.0"
+// TODO: ADD YOUR CLOUD SERVICE LIBRARY HERE
 
 // Supporting files
 @include __PATH__ + "/../shared/Logger.shared.nut"
 @include __PATH__ + "/../shared/Constants.shared.nut"
 @include __PATH__ + "/Location.agent.nut"
+@include __PATH__ + "/Cloud.agent.nut"
 
 
 // Main Application
@@ -39,8 +41,9 @@
 
 class MainController {
     
-    loc = null;
-    mm  = null;
+    loc   = null;
+    mm    = null;
+    cloud = null;
 
     constructor() {
         // Initialize Logger 
@@ -57,6 +60,10 @@ class MainController {
         // Open listeners for messages from device
         mm.on(MM_REPORT, processReport.bindenv(this));
         mm.on(MM_ASSIST, getAssist.bindenv(this));
+
+        // Initialize Cloud Service
+        // NOTE: Cloud service class is empty and will initialize an empty framework 
+        cloud = Cloud();
     }
 
     function processReport(msg, reply) {
@@ -81,11 +88,13 @@ class MainController {
             //         "capacity": 2064 
             //     }, 
             //     "ts": 1551467430,                    // Always included, timestamp when report sent
-            //     "secSinceBoot": 35126,               // Always included
-            //     "movement" : true                    // Only included if movement event occured
+            //     "secSinceBoot": 55.665001,           // Always included
+            //     "movement" : true                    // Always included
             // }
 
-        // TODO: Send device data to cloud service
+        // Send device data to cloud service
+        // NOTE: Cloud service send is an empty function
+        cloud.send(report);
     }
 
     function getAssist(msg, reply) {
