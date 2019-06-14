@@ -17,6 +17,8 @@ This example requires the following hardware:
 
 This project uses u-blox AssistNow services, and requires an account and authorization token from u-blox. To apply for an account, please register [here](http://www.u-blox.com/services-form.html).
 
+You will also need an Electric Imp account: [register here](https://developer.electricimp.com/impcentrallaunchpoint).
+
 ## Setup ##
 
 This project has been written using [Electric Imp’s plug-in for Microsoft’s VS Code text editor](https://github.com/electricimp/vscode). All configuration settings and pre-processed files have been excluded. Please follow [these instructions](https://github.com/electricimp/vscode#installation) to install the plug-in and create a project.
