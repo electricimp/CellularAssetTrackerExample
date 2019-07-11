@@ -1,4 +1,4 @@
-# Low Power Cellular Asset Tracker 1.0.1 #
+# Low Power Cellular Asset Tracker 1.0.2 #
 
 ## Overview ##
 
@@ -53,6 +53,8 @@ Rough wake timings base on code committed on 3/1/18 under good cellular conditio
 
 ## Release Notes ##
 
+- 1.0.2
+    - Update [BQ25895 library](https://github.com/electricimp/BQ25895) to v3.0.0.
 - 1.0.1
     - Update `Battery.device.nut` and `Main.device.nut` to support the new [BQ25895 library](https://github.com/electricimp/BQ25895).
 - 1.0.0

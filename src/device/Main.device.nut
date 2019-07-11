@@ -34,7 +34,7 @@
 #require "UBloxAssistNow.device.lib.nut:0.1.0"
 // Battery Charger/Fuel Gauge Libraries
 #require "MAX17055.device.lib.nut:1.0.1"
-#require "BQ25895.device.lib.nut:2.0.0"
+#require "BQ25895.device.lib.nut:3.0.0"
 
 // Beta Libraries (unpublished versions)
 @include "github:electricimp/LPDeviceManager/LPDeviceManager.device.lib.nut@develop"

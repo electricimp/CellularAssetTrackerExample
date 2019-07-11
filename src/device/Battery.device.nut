@@ -40,8 +40,8 @@ const FG_RECOVERY_V       = 3.88;   // V
 const BATT_STATUS_CHECK_TIMEOUT = 0.5;
 
 // Manages Battery Monitoring
-// Dependencies: MAX17055, BQ25895M (may configure sensor i2c) Libraries
-// Initializes: MAX17055, BQ25895M Libraries
+// Dependencies: MAX17055, BQ25895 (may configure sensor i2c) Libraries
+// Initializes: MAX17055, BQ25895 Libraries
 class Battery {
 
     charger = null;
