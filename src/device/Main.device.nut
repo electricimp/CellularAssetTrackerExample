@@ -64,7 +64,7 @@ const MOVEMENT_THRESHOLD     = 0.05;
 const LOCATION_ACCURACY      = 10;
 // Maximum time to wait for GPS to get a fix, before trying to send report
 // NOTE: This should be less than the MAX_WAKE_TIME
-const LOCATION_TIMEOUT_SEC   = 55; 
+const LOCATION_TIMEOUT_SEC   = 60; 
 const OFFLINE_ASSIST_REQ_MAX = 43200; // Limit requests to every 12h (12 * 60 * 60) 
 // Distance threshold in meters (~200ft)
 const DISTANCE_THRESHOLD_M   = 60;
@@ -72,7 +72,7 @@ const DISTANCE_THRESHOLD_M   = 60;
 const VALID_TS_YEAR          = 2019;
 
 // Maximum time to stay awake
-const MAX_WAKE_TIME          = 60;
+const MAX_WAKE_TIME          = 65;
 // Low battery alert threshold in percentage
 const BATTERY_LOW_THRESH     = 10;
 
@@ -80,21 +80,25 @@ const BATTERY_LOW_THRESH     = 10;
 
 class MainController {
 
-    cm          = null;
-    mm          = null;
-    lpm         = null;
-    move        = null;
-    loc         = null;
-    persist     = null;
-    battery     = null;
+    // Supporting CLasses
+    cm                   = null;
+    mm                   = null;
+    lpm                  = null;
+    move                 = null;
+    loc                  = null;
+    persist              = null;
 
-    bootTime    = null;
-    fix         = null;
-    battStatus  = null;
-    thReading   = null;
-    readyToSend = null;
-    sleep       = null;
-    reportTimer = null;
+    // Report Values
+    fix                  = null;
+    battStatus           = null;
+    thReading            = null;
+
+    // Application Variables
+    bootTime             = null;
+    sleep                = null;
+    gpsFixTimer          = null;
+    reportSent           = null; 
+    gettingOfflineAssist = null;
 
     constructor() {
         // Get boot timestamp
@@ -143,8 +147,9 @@ class MainController {
         mm = MessageManager({"connectionManager" : cm});
         mm.onTimeout(mmOnTimeout.bindenv(this));
 
-        // Flag for sending GPS fix data only when connected
-        readyToSend = false;
+        // Set tracking flag defaults
+        reportSent           = false;
+        gettingOfflineAssist = false;
     }
 
     // MM handlers
@@ -166,7 +171,6 @@ class MainController {
     function mmOnAssistFail(msg, err, retry) {
         ::error("[Main] Request for assist messages failed, retrying");
         retry();
-        // TODO: Track if offline assist failed - then allow device to sleep
     }
 
     // MM onAck handler for report
@@ -202,6 +206,8 @@ class MainController {
             persist.storeAssist(response);
             // Update time we last checked
             persist.setOfflineAssistChecked(time());
+            // Offline assist messages stored, toggle flag
+            gettingOfflineAssist = false;
 
             // Get today's date string/file name
             local todayFileName = Location.getAssistDateFileName();
@@ -235,22 +241,20 @@ class MainController {
         };
 
         if (shouldGetOfflineAssist()) {
-            // We don't have a fix, request assist online data
+            gettingOfflineAssist = true;
+            // Refresh offline assist messages
             ::debug("[Main] Requesting offline assist messages from agent/Assist Now.");
             mm.send(MM_ASSIST, ASSIST_TYPE.OFFLINE, mmHandlers);
-            // TODO: Add flag - don't power down GPS til written, & don't sleep
         }
 
         // Note: We are only checking for GPS fix, The assumption is that an accurate GPS fix will
         // take longer than getting battery status, env readings etc.
-        if (fix == null) {
-            // Flag used to trigger report send from inside location callback
-            readyToSend = true;
+        if (fix != null) {
+            sendReport();
+        } else {
             // We don't have a fix, request assist online data
             ::debug("[Main] Requesting online assist messages from agent/Assist Now.");
             mm.send(MM_ASSIST, ASSIST_TYPE.ONLINE, mmHandlers);
-        } else {
-            sendReport();
         }
     }
 
@@ -296,14 +300,14 @@ class MainController {
         powerDown();
     }
 
-    // Wake up (not on interrupt or timer) flow
+    // Wake up flow - triggered on all connects except interrupt or timer
     function onBoot(wakereson) {
         ::debug("[Main] Wake reason: " + lpm.wakeReasonDesc());
 
         // Enable movement monitor
         move.enable(MOVEMENT_THRESHOLD, onMovement.bindenv(this));
 	    // NOTE: overwriteStoredConnectSettings method only needed if CHECK_IN_TIME_SEC
-        // and/or REPORT_TIME_SEC have been changed
+        // and/or REPORT_TIME_SEC have been changed - leave this while in development
         overwriteStoredConnectSettings();
 
         // Send report if connected or alert condition noted, then sleep
@@ -324,6 +328,8 @@ class MainController {
 
     // Create and send device status report to agent
     function sendReport() {
+        reportSent = true;
+
         local report = {
             "secSinceBoot" : (hardware.millis() - bootTime) / 1000.0,
             "ts"           : time(),
@@ -347,9 +353,6 @@ class MainController {
                 if (mostAccFix.accuracy <= LOCATION_REPORT_ACCURACY) report.fix <- mostAccFix;
             } 
         }
-
-        // Toggle send flag
-        readyToSend = false;
 
         // MOVEMENT DEBUGGING LOG
         ::debug("[Main] Accel is enabled: " + move._isAccelEnabled() + ", accel int enabled: " + move._isAccelIntEnabled() + ", movement flag: " + persist.getMoveDetected());
@@ -375,7 +378,7 @@ class MainController {
         // NOTE: I2C is configured when Motion class is initailized in the
         // constructor of this class, so we don't need to configure it here.
         // Initialize Battery Monitor without configuring i2c
-        if (battery == null) battery = Battery(false);
+        local battery = Battery(false);
         battery.getStatus(onBatteryStatus.bindenv(this));
     }
 
@@ -402,17 +405,17 @@ class MainController {
         ::debug("[Main] Next report time " + reportTime + ", in " + (reportTime - now) + "s");
     }
 
-    function setReportTimer() {
+    function setLocTimeout() {
         // Ensure only one timer is set
-        cancelReportTimer();
+        cancelLocTimeout();
         // Start a timer to send report if no GPS fix is found
-        reportTimer = imp.wakeup(LOCATION_TIMEOUT_SEC, onReportTimerExpired.bindenv(this));
+        gpsFixTimer = imp.wakeup(LOCATION_TIMEOUT_SEC, onGpsFixTimerExpired.bindenv(this));
     }
 
-    function cancelReportTimer() {
-        if (reportTimer != null) {
-            imp.cancelwakeup(reportTimer);
-            reportTimer = null;
+    function cancelLocTimeout() {
+        if (gpsFixTimer != null) {
+            imp.cancelwakeup(gpsFixTimer);
+            gpsFixTimer = null;
         }
     }
 
@@ -450,19 +453,19 @@ class MainController {
 
     // If report timer expires before accurate GPS fix is not found,
     // disable GPS power and send report if connected
-    function onReportTimerExpired() {
+    function onGpsFixTimerExpired() {
         ::debug("[Main] GPS failed to get an accurate fix. Disabling GPS power.");
         PWR_GATE_EN.write(0);
 
          // Send report if connection handler has already run
         // and report has not been sent
-        if (readyToSend) sendReport();
+        if (lpm.isConnected()) sendReport();
     }
 
     // Stores fix data, and powers down the GPS
     function onAccFix(gpxFix) {
         // We got a fix, cancel timer to send report automatically
-        cancelReportTimer();
+        cancelLocTimeout();
 
         ::debug("[Main] Got fix");
         fix = gpxFix;
@@ -472,7 +475,7 @@ class MainController {
 
         // Send report if connection handler has already run
         // and report has not been sent
-        if (readyToSend) sendReport();
+        if (lpm.isConnected() && !reportSent) sendReport();
     }
 
     // Stores battery status for use in report
@@ -513,11 +516,10 @@ class MainController {
     // Runs a check and triggers sleep flow
     function checkAndSleep() {
         if (shouldConnect() || lpm.isConnected()) {
-            // We are connected or if report should be filed
             if (!lpm.isConnected()) ::debug("[Main] Connecting...");
             // Set timer to send report if GPS doesn't get a fix, and we are connected
-            setReportTimer();
-            // Connect if needed and run connection flow
+            setLocTimeout();
+            // Connect/Run connection flow
             lpm.connect();
             // Power up GPS and try to get a location fix
             getLocation();
