@@ -28,16 +28,15 @@
 #require "UBloxM8N.device.lib.nut:1.0.1"
 #require "UbxMsgParser.lib.nut:2.0.0"
 #require "LIS3DH.device.lib.nut:2.0.2"
+#require "HTS221.device.lib.nut:2.0.1"
 #require "SPIFlashFileSystem.device.lib.nut:2.0.0"
 #require "ConnectionManager.lib.nut:3.1.1"
 #require "MessageManager.lib.nut:2.4.0"
+#require "LPDeviceManager.device.lib.nut:0.1.0"
 #require "UBloxAssistNow.device.lib.nut:0.1.0"
 // Battery Charger/Fuel Gauge Libraries
 #require "MAX17055.device.lib.nut:1.0.1"
 #require "BQ25895.device.lib.nut:3.0.0"
-
-// Beta Libraries (unpublished versions)
-@include "github:electricimp/LPDeviceManager/LPDeviceManager.device.lib.nut@develop"
 
 // Supporting files
 // NOTE: Order of files matters do NOT change unless you know how it will effect
@@ -49,15 +48,15 @@
 @include __PATH__ + "/Location.device.nut"
 @include __PATH__ + "/Motion.device.nut"
 @include __PATH__ + "/Battery.device.nut"
-
+@include __PATH__ + "/Env.device.nut"
 
 // Main Application
 // -----------------------------------------------------------------------
 
 // Wake every x seconds to check if report should be sent
-const CHECK_IN_TIME_SEC  = 86400; // 60s * 60m * 24h
+const CHECK_IN_TIME_SEC  = 900;
 // Wake every x seconds to send a report, regaurdless of check results
-const REPORT_TIME_SEC    = 604800; // 60s * 60m * 24h * 7d
+const REPORT_TIME_SEC    = 3600;
 
 // Force in Gs that will trigger movement interrupt
 const MOVEMENT_THRESHOLD = 0.05;
@@ -84,6 +83,7 @@ class MainController {
     bootTime    = null;
     fix         = null;
     battStatus  = null;
+    thReading   = null;
     readyToSend = null;
     sleep       = null;
     reportTimer = null;
@@ -190,9 +190,8 @@ class MainController {
     // Connection Flow
     function onConnect() {
         ::debug("Device connected...");
-        // Note: We are only checking for GPS fix, not battery status completion
-        // before sending report. The assumption is that an accurate GPS fix will
-        // take longer than getting battery status.
+        // Note: We are only checking for GPS fix, The assumption is that an accurate GPS fix will
+        // take longer than getting battery status, env readings etc.
         if (fix == null) {
             // Flag used to trigger report send from inside location callback
             readyToSend = true;
@@ -285,10 +284,28 @@ class MainController {
         }
 
         if (battStatus != null) report.battStatus <- battStatus;
-        if (fix != null) report.fix <- fix;
+        if (thReading != null) {
+            report.temperature <- thReading.temperature;
+            report.humidity    <- thReading.humidity;
+        }
+        if (fix != null) {
+            report.fix <- fix;
+        } else {
+            local mostAccFix = loc.gpsFix;
+            // If GPS got a fix of any sort
+            if (mostAccFix != null) {
+                // Log the fix summery
+                ::debug(format("fixType: %s, numSats: %s, accuracy: %s", mostAccFix.fixType.tostring(), mostAccFix.numSats.tostring(), mostAccFix.accuracy.tostring()));
+                // Add to report if fix was within the reporting accuracy
+                if (mostAccFix.accuracy <= LOCATION_REPORT_ACCURACY) report.fix <- mostAccFix;
+            } 
+        }
 
         // Toggle send flag
         readyToSend = false;
+
+        // MOVEMENT DEBUGGING LOG
+        ::debug("Accel is enabled: " + move._isAccelEnabled() + ", accel int enabled: " + move._isAccelIntEnabled() + ", movement flag: " + persist.getMoveDetected());
 
         // Send to agent
         ::debug("Sending device status report to agent");
@@ -313,6 +330,16 @@ class MainController {
         // Initialize Battery Monitor without configuring i2c
         if (battery == null) battery = Battery(false);
         battery.getStatus(onBatteryStatus.bindenv(this));
+    }
+
+    // Initializes Env Monitor and gets temperature and humidity
+    function getSensorReadings() {
+        // Get temperature and humidity reading
+        // NOTE: I2C is configured when Motion class is initailized in the 
+        // constructor of this class, so we don't need to configure it here.
+        // Initialize Environmental Monitor without configuring i2c
+        local env = Env();
+        env.getTempHumid(onTempHumid.bindenv(this));
     }
 
     // Updates report time
@@ -340,17 +367,6 @@ class MainController {
             imp.cancelwakeup(reportTimer);
             reportTimer = null;
         }
-    }
-
-    // If report timer expires before accurate GPS fix is not found,
-    // disable GPS power and send report if connected
-    function onReportTimerExpired() {
-        ::debug("GPS failed to get an accurate fix. Disabling GPS power.");
-        PWR_GATE_EN.write(0);
-
-         // Send report if connection handler has already run
-        // and report has not been sent
-        if (readyToSend) sendReport();
     }
 
     // Async Action Handlers
@@ -384,6 +400,18 @@ class MainController {
         }
     }
 
+
+    // If report timer expires before accurate GPS fix is not found,
+    // disable GPS power and send report if connected
+    function onReportTimerExpired() {
+        ::debug("GPS failed to get an accurate fix. Disabling GPS power.");
+        PWR_GATE_EN.write(0);
+
+         // Send report if connection handler has already run
+        // and report has not been sent
+        if (readyToSend) sendReport();
+    }
+
     // Stores fix data, and powers down the GPS
     function onAccFix(gpxFix) {
         // We got a fix, cancel timer to send report automatically
@@ -406,6 +434,13 @@ class MainController {
         ::debug("Remaining cell capacity: " + status.capacity + "mAh");
         ::debug("Percent of battery remaining: " + status.percent + "%");
         battStatus = status;
+    }
+
+    // Stores temperature and humidity reading for use in report
+    function onTempHumid(reading) {
+        ::debug("Get temperature and humidity complete:")
+        ::debug(format("Current Humidity: %0.2f %s, Current Temperature: %0.2f °C", reading.humidity, "%", reading.temperature));
+        thReading = reading;
     }
 
     // Sleep Management
@@ -439,9 +474,10 @@ class MainController {
             lpm.connect();
             // Power up GPS and try to get a location fix
             getLocation();
+            // Get sensor readings for report
+            getSensorReadings();
             // Get battery status
             getBattStatus();
-            // TODO: Get sensor readings for report, if desired.
         } else {
             // Go to sleep
             powerDown();
@@ -455,7 +491,14 @@ class MainController {
         ::debug("Time since code started: " + (now - bootTime) + "ms");
         ::debug("Going to sleep...");
 
-        (sleep != null) ? sleep() : lpm.sleepFor(getSleepTimer());
+        local sleepTime;
+        if (sleep == null) {
+            sleepTime = getSleepTimer();
+            ::debug("Setting sleep timer: " + sleepTime + "s");
+        }
+
+        // Put device to sleep 
+        (sleep != null) ? sleep() : lpm.sleepFor(sleepTime);
     }
 
     // Helpers
