@@ -27,6 +27,7 @@
 const DEFAULT_GPS_ACCURACY = 9999;
 const GPS_UART_BAUDRATE    = 115200;
 const LOCATION_CHECK_SEC   = 1;
+const EARTH_RADIUS_KM      = 6373;
 
 enum FIX_TYPE {
     NO_FIX,
@@ -50,11 +51,21 @@ class Location {
     onAccFix   = null;
 
     bootTime   = null;
+    numSats    = null;
+
+    // Parameter is the table returned by date
+    // NOTE: this function doesn't need assist or location class to be initialized to use, 
+    // So create as a static function.
+    static function getAssistDateFileName(d = null) {
+        // If date is null getDateString will call imp API date()
+        // and use that to create a date string for today
+        return UBloxAssistNow.getDateString(d);
+    }
 
     constructor(_bootTime) {
         bootTime = _bootTime;
 
-        ::debug("Configuring u-blox...");
+        ::debug("[Location] Configuring u-blox...");
         ubx = UBloxM8N(GPS_UART);
         local ubxSettings = {
             "baudRate"     : GPS_UART_BAUDRATE,
@@ -74,7 +85,7 @@ class Location {
         ubx.configure(ubxSettings);
         assist = UBloxAssistNow(ubx);
         
-        ::debug("Enable navigation messages...");
+        ::debug("[Location] Enable navigation messages...");
         // Enable Position Velocity Time Solution messages
         ubx.enableUbxMsg(UBX_MSG_PARSER_CLASS_MSG_ID.NAV_PVT, LOCATION_CHECK_SEC, _onNavMsg.bindenv(this));
     }
@@ -92,7 +103,70 @@ class Location {
     }
 
     function writeAssistMsgs(msgs, onDone = null) {
-        assist.writeAssistNow(msgs, onDone);
+        if (typeof msgs == "blob") {
+            assist.writeAssistNow(msgs, onDone);
+        } else {
+            // Format error like those returned from UBLOX 
+            local err = {
+                "error"    : "Unexpected assist now messages. Aborting write to UBLOX", 
+                "payload"  : msgs,
+                "type"     : 0, 
+                "infoCode" : 6  
+            }
+            onDone([err]);
+        }
+    }
+
+    function writeUtcTimeAssist() {
+        assist.writeUtcTimeAssist();
+    }
+
+        // Returns boolean if differences in GPS data have exeeded the threshold
+    function filterGPS(newLat, newLng, prevLat, prevLng, threshold) {
+        local nLat = _convertToDecDegFloat(newLat);
+        local nLng = _convertToDecDegFloat(newLng);
+
+        local pLat = _convertToDecDegFloat(prevLat);
+        local pLng = _convertToDecDegFloat(prevLng);
+
+        return (math.fabs(nLat - pLat) > threshold || math.fabs(nLng - pLng) > threshold);
+    }
+
+    function calculateDistance(newLat, newLng, prevLat, prevLng) {
+        // NOTE: This calculation is an approximation for distance - it doesn't take into 
+        // account altitude or the exact curvature of the earth. Based on Haversine formula
+        // http://en.wikipedia.org/wiki/Haversine_formula
+        local nLat = _convertToDecDegFloat(newLat);
+        local nLng = _convertToDecDegFloat(newLng);
+
+        local pLat = _convertToDecDegFloat(prevLat);
+        local pLng = _convertToDecDegFloat(prevLng);
+
+        ::debug(format("[Location] new lat: %.10f new lng: %.10f", nLat, nLng));
+        ::debug(format("[Location] old lat: %.10f old lng: %.10f", pLat, pLng));
+
+        local dlat = _deg2rad(nLat - pLat);
+        local dlng = _deg2rad(nLng - pLng);
+        local rplat = _deg2rad(pLat);
+        local rlat = _deg2rad(nLat);
+        
+        local s1 = math.sin(dlat / 2);
+        local s2 = math.sin(dlng / 2);
+        
+        local a = (s1 * s1) + math.cos(rplat) * math.cos(rlat) * (s2 * s2);
+        local c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+        local dist = EARTH_RADIUS_KM * c * 1000; // Convert km to meters
+        ::debug(format("[Location] Device traveled %.10f meters",  dist));
+        
+        return dist;
+    }
+
+    function _convertToDecDegFloat(raw) {
+        return raw / 10000000.0;
+    }
+
+    function _deg2rad(deg) {
+        return deg * PI / 180;
     }
 
     function _onNavMsg(payload) {
@@ -123,45 +197,45 @@ class Location {
     }
 
     function _onUbxMsg(payload, classId) {
-        ::debug("In Location ubx msg handler...");
+        ::debug("[Location] In Location ubx msg handler...");
         ::debug("-----------------------------------------");
 
         // Log message info
-        ::debug(format("Msg Class ID: 0x%04X", classId));
-        ::debug("Msg len: " + payload.len());
+        ::debug(format("[Location] Msg Class ID: 0x%04X", classId));
+        ::debug("[Location] Msg len: " + payload.len());
 
         ::debug("-----------------------------------------");
     }
 
     function _onNmeaMsg(sentence) {
-        ::debug("In Location NMEA msg handler...");
+        ::debug("[Location] In Location NMEA msg handler...");
         // Log NMEA message
         ::debug(sentence);
     }
 
     function _onACK(payload) {
-        ::debug("In Location ACK_ACK msg handler...");
+        ::debug("[Location] In Location ACK_ACK msg handler...");
         ::debug("-----------------------------------------");
 
         local parsed = UbxMsgParser[UBX_MSG_PARSER_CLASS_MSG_ID.ACK_ACK](payload);
         if (parsed.error != null) {
             ::error(parsed.error);
         } else {
-            ::debug(format("ACK-ed msgId: 0x%04X", parsed.ackMsgClassId));
+            ::debug(format("[Location] ACK-ed msgId: 0x%04X", parsed.ackMsgClassId));
         }
 
         ::debug("-----------------------------------------");
     }
 
     function _onNAK(payload) {
-        ::debug("In Location ACK_NAK msg handler...");
+        ::debug("[Location] In Location ACK_NAK msg handler...");
         ::debug("-----------------------------------------");
 
         local parsed = UbxMsgParser[UBX_MSG_PARSER_CLASS_MSG_ID.ACK_NAK](payload);
         if (parsed.error != null) {
             ::error(parsed.error);
         } else {
-            ::error(format("NAK-ed msgId: 0x%04X", parsed.nakMsgClassId));
+            ::error(format("[Location] NAK-ed msgId: 0x%04X", parsed.nakMsgClassId));
         }
 
         ::debug("-----------------------------------------");
@@ -173,6 +247,9 @@ class Location {
         local timeStr = format("%04d-%02d-%02dT%02d:%02d:%02dZ", payload.year, payload.month, payload.day, payload.hour, payload.min, payload.sec);
 
         if (fixType >= FIX_TYPE.FIX_3D) {
+            // Clears numSats var
+            numSats = null;
+
             // Get timestamp for this fix
             local fixTime = (hardware.millis() - bootTime) / 1000.0;
 
@@ -194,9 +271,16 @@ class Location {
             gpsFix.accuracy <- _getAccuracy(payload.hAcc);
 
             if (onAccFix != null) _checkAccuracy();
-        } else {
+        } else if ("numSV" in payload) {
+            local nsv = payload.numSV;
             // This will trigger on every message, so don't log message unless you are debugging
-            ::debug(format("no fix %d, satellites %d, date %s", fixType, payload.numSV, timeStr));
+            // ::debug(format("[Location] no fix %d, satellites %d, date %s", fixType, nsv, timeStr));
+            
+            // Limit logs - log when number of satellites in view changes
+            if (numSats != nsv) {
+                numSats = nsv;
+                ::debug(format("[Location] no fix %d, satellites %d, date %s", fixType, numSats, timeStr));
+            }
         }
     }
 

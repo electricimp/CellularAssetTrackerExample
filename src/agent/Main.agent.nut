@@ -49,7 +49,7 @@ class MainController {
         // Initialize Logger 
         Logger.init(LOG_LEVEL.DEBUG);
 
-        ::debug("Agent started...");
+        ::debug("[Main] Agent started...");
 
         // Initialize Assist Now Location Helper
         loc = Location();
@@ -69,28 +69,26 @@ class MainController {
     function processReport(msg, reply) {
         local report = msg.data;
 
-        ::debug("Recieved status update from devcie: ");
+        // Log status report from device
+        ::debug("[Main] Recieved status update from device: ");
+        ::debug("--------------------------------------------------------------");
         ::debug(http.jsonencode(report));
-        // Report Structure (movement, fix and battStatus only included if data was collected)
-            // { 
-            //     "fix" : {                            // Only included if fix was obtained
-            //         "accuracy": 9.3620005,           // fix accuracy
-            //         "secToFix": 36.978001,           // sec from boot til accurate fix 
-            //         "lat": "37.3957215",             // latitude
-            //         "numSats": 10,                   // number of satellites used in fix
-            //         "lon": "-122.1022552",           // longitude
-            //         "fixType": 3,                    // type of fix
-            //         "secTo1stFix": 9.1499996,        // ms from boot til first fix (not accurate)
-            //         "time": "2019-03-01T19:10:32Z"   // time from GPS message
-            //     }, 
-            //     "battStatus": {                      // Only included if info returned from fuel gauge
-            //         "percent": 85.53125, 
-            //         "capacity": 2064 
-            //     }, 
-            //     "ts": 1551467430,                    // Always included, timestamp when report sent
-            //     "secSinceBoot": 55.665001,           // Always included
-            //     "movement" : true                    // Always included
-            // }
+
+        if ("battStatus" in report && report.battStatus.percent <= 10) {
+            ::log("[Main] LOW BATTERY WARNING: " + report.battStatus.percent + " REMAINING.");
+        }
+
+        if ("fix" in report) {
+            local fix = report.fix;
+            ::debug("[Main] Location details: ");
+            ::debug("[Main] Fix time " + fix.time);
+            ::debug("[Main] Seconds to first fix: " + fix.secTo1stFix);
+            ::debug("[Main] Seconds to accurate fix: " + fix.secToFix);
+            ::debug("[Main] Fix type: " + getFixDescription(fix.fixType));
+            ::debug("[Main] Fix accuracy: " + fix.accuracy + " meters");
+            ::debug("[Main] Latitude: " + fix.lat + ", Longitude: " + fix.lon);
+        }
+        ::debug("--------------------------------------------------------------");
 
         // Send device data to cloud service
         // NOTE: Cloud service send is an empty function
@@ -98,14 +96,32 @@ class MainController {
     }
 
     function getAssist(msg, reply) {
-        ::debug("Requesting online assist messages from u-blox webservice");
-        loc.getOnlineAssist(function(assistMsgs) {
-            ::debug("Received online assist messages from u-blox webservice");
-            if (assistMsgs != null) {
-                ::debug("Sending device online assist messages");
-                reply(assistMsgs);
-            }
-        }.bindenv(this))
+        switch (msg.data) {
+            case ASSIST_TYPE.OFFLINE:
+                ::debug("[Main] Requesting offline assist messages from u-blox webservice");
+                loc.getOfflineAssist(function(assistMsgs) {
+                    ::debug("[Main] Received online assist messages from u-blox webservice");
+                    if (assistMsgs != null) {
+                        ::debug("[Main] Sending device offline assist messages");
+                        reply(assistMsgs);
+                    }
+                }.bindenv(this))
+                break;
+            case ASSIST_TYPE.ONLINE:
+                ::debug("[Main] Requesting online assist messages from u-blox webservice");
+                loc.getOnlineAssist(function(assistMsgs) {
+                    ::debug("[Main] Received online assist messages from u-blox webservice");
+                    if (assistMsgs != null) {
+                        ::debug("[Main] Sending device online assist messages");
+                        reply(assistMsgs);
+                    }
+                }.bindenv(this))
+                break;
+            default: 
+                ::error("[Main] Unknown assist request from device: " + msg.data);
+        }
+
+
     }
 
     function getFixDescription(fixType) {

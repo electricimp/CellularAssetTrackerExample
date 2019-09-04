@@ -54,21 +54,29 @@
 // -----------------------------------------------------------------------
 
 // Wake every x seconds to check if report should be sent
-const CHECK_IN_TIME_SEC  = 900;
+const CHECK_IN_TIME_SEC      = 300;
 // Wake every x seconds to send a report, regaurdless of check results
-const REPORT_TIME_SEC    = 3600;
+const REPORT_TIME_SEC        = 900;
 
 // Force in Gs that will trigger movement interrupt
-const MOVEMENT_THRESHOLD = 0.05;
+const MOVEMENT_THRESHOLD     = 0.05;
 // Accuracy of GPS fix in meters
-const LOCATION_ACCURACY  = 10;
-// Constant used to validate imp's timestamp
-const VALID_TS_YEAR      = 2019;
-// Maximum time to stay awake
-const MAX_WAKE_TIME      = 60;
+const LOCATION_ACCURACY      = 10;
 // Maximum time to wait for GPS to get a fix, before trying to send report
 // NOTE: This should be less than the MAX_WAKE_TIME
-const GPS_TIMEOUT        = 55;
+const LOCATION_TIMEOUT_SEC   = 55; 
+const OFFLINE_ASSIST_REQ_MAX = 43200; // Limit requests to every 12h (12 * 60 * 60) 
+// Distance threshold in meters (~200ft)
+const DISTANCE_THRESHOLD_M   = 60;
+// Constant used to validate imp's timestamp
+const VALID_TS_YEAR          = 2019;
+
+// Maximum time to stay awake
+const MAX_WAKE_TIME          = 60;
+// Low battery alert threshold in percentage
+const BATTERY_LOW_THRESH     = 10;
+
+
 
 class MainController {
 
@@ -98,19 +106,18 @@ class MainController {
         // TODO: In production update CM_BLINK to NEVER to conserve battery power
         // TODO: Look into setting connection timeout (currently using default of 60s)
         cm = ConnectionManager({ 
-	    "blinkupBehavior": CM_BLINK_ALWAYS,
-	    "retryOnTimeout" : false
-	});
+	        "blinkupBehavior": CM_BLINK_ALWAYS,
+	        "retryOnTimeout" : false
+	    });
         imp.setsendbuffersize(8096);
 
         // Initialize Logger
         Logger.init(LOG_LEVEL.DEBUG, cm);
 
         ::debug("--------------------------------------------------------------------------");
-        ::debug("Device started...");
+        ::debug("[Main] Device started...");
         ::debug(imp.getsoftwareversion());
-        ::debug("--------------------------------------------------------------------------");
-        PWR_GATE_EN.configure(DIGITAL_OUT, 0);
+        ::debug("--------------------------------------------------------------------------");       PWR_GATE_EN.configure(DIGITAL_OUT, 0);
 
         // Initialize movement tracker, boolean to configure i2c in Motion constructor
         // NOTE: This does NOT configure/enable/disable movement tracker
@@ -145,26 +152,27 @@ class MainController {
 
     // Global MM Timeout handler
     function mmOnTimeout(msg, wait, fail) {
-        ::debug("MM message timed out");
+        ::debug("[Main] MM message timed out");
         fail();
     }
 
     // MM onFail handler for report
     function mmOnReportFail(msg, err, retry) {
-        ::error("Report send failed");
+        ::error("[Main] Report send failed");
         powerDown();
     }
 
     // MM onFail handler for assist messages
     function mmOnAssistFail(msg, err, retry) {
-        ::error("Request for assist messages failed, retrying");
+        ::error("[Main] Request for assist messages failed, retrying");
         retry();
+        // TODO: Track if offline assist failed - then allow device to sleep
     }
 
     // MM onAck handler for report
     function mmOnReportAck(msg) {
         // Report successfully sent
-        ::debug("Report ACK received from agent");
+        ::debug("[Main] Report ACK received from agent");
 
         // Clear & reset movement detection
         if (persist.getMoveDetected()) {
@@ -179,9 +187,38 @@ class MainController {
 
     // MM onReply handler for assist messages
     function mmOnAssist(msg, response) {
-        ::debug("Assist messages received from agent. Writing to u-blox");
-        // Response contains assist messages from cloud.
-        loc.writeAssistMsgs(response, onAssistMsgDone.bindenv(this));
+        if (response == null) {
+            ::debug("[Main] Didn't receive any Assist messages from agent.");
+            return;
+        }
+
+        // Response contains assist messages from cloud
+        local assistMsgs = response;
+
+        if (msg.payload.data == ASSIST_TYPE.OFFLINE) {
+            ::debug("[Main] Offline assist messages received from agent");
+
+            // Store all offline assist messages by date
+            persist.storeAssist(response);
+            // Update time we last checked
+            persist.setOfflineAssistChecked(time());
+
+            // Get today's date string/file name
+            local todayFileName = Location.getAssistDateFileName();
+            // Select today's offline assist messages only
+            if (todayFileName in response) {
+                assistMsgs = response.todayFileName;
+                ::debug("[Main] Writing offline assist messages to u-blox");
+            } else {
+                ::debug("[Main] No offline assist messges for today. No messages written to UBLOX.");
+                return;
+            }
+        } else {
+            ::debug("[Main] Online assist messages received from agent. Writing to u-blox");
+        }
+
+        // If GPS is still powered, write assist messages to UBLOX module to help get accurate fix more quickly
+        if (PWR_GATE_EN.read() && loc) loc.writeAssistMsgs(assistMsgs, onAssistMsgDone.bindenv(this));
     }
 
     // Connection & Connection Flow Handlers
@@ -189,19 +226,29 @@ class MainController {
 
     // Connection Flow
     function onConnect() {
-        ::debug("Device connected...");
+        ::debug("[Main] Device connected...");
+
+        // Configure UBLOX Assist message handlers
+        local mmHandlers = {
+            "onReply" : mmOnAssist.bindenv(this),
+            "onFail"  : mmOnAssistFail.bindenv(this)
+        };
+
+        if (shouldGetOfflineAssist()) {
+            // We don't have a fix, request assist online data
+            ::debug("[Main] Requesting offline assist messages from agent/Assist Now.");
+            mm.send(MM_ASSIST, ASSIST_TYPE.OFFLINE, mmHandlers);
+            // TODO: Add flag - don't power down GPS til written, & don't sleep
+        }
+
         // Note: We are only checking for GPS fix, The assumption is that an accurate GPS fix will
         // take longer than getting battery status, env readings etc.
         if (fix == null) {
             // Flag used to trigger report send from inside location callback
             readyToSend = true;
             // We don't have a fix, request assist online data
-            ::debug("Requesting assist messages from agnet/cloud.");
-            local mmHandlers = {
-                "onReply" : mmOnAssist.bindenv(this),
-                "onFail"  : mmOnAssistFail.bindenv(this)
-            };
-            mm.send(MM_ASSIST, null, mmHandlers);
+            ::debug("[Main] Requesting online assist messages from agent/Assist Now.");
+            mm.send(MM_ASSIST, ASSIST_TYPE.ONLINE, mmHandlers);
         } else {
             sendReport();
         }
@@ -209,13 +256,13 @@ class MainController {
 
     // Connection time-out flow
     function onConnTimeout() {
-        ::debug("Connection try timed out.");
+        ::debug("[Main] Connection try timed out.");
         powerDown();
     }
 
     // Wake up on timer flow
     function onScheduledWake() {
-        ::debug("Wake reason: " + lpm.wakeReasonDesc());
+        ::debug("[Main] Wake reason: " + lpm.wakeReasonDesc());
 
         // Configure Interrupt Wake Pin
         // No need to (re)enable movement detection, these settings
@@ -237,7 +284,7 @@ class MainController {
 
     // Wake up on interrupt flow
     function onMovementWake() {
-        ::debug("Wake reason: " + lpm.wakeReasonDesc());
+        ::debug("[Main] Wake reason: " + lpm.wakeReasonDesc());
 
         // If event valid, disables movement interrupt and store movement flag
         onMovement();
@@ -251,7 +298,7 @@ class MainController {
 
     // Wake up (not on interrupt or timer) flow
     function onBoot(wakereson) {
-        ::debug("Wake reason: " + lpm.wakeReasonDesc());
+        ::debug("[Main] Wake reason: " + lpm.wakeReasonDesc());
 
         // Enable movement monitor
         move.enable(MOVEMENT_THRESHOLD, onMovement.bindenv(this));
@@ -295,7 +342,7 @@ class MainController {
             // If GPS got a fix of any sort
             if (mostAccFix != null) {
                 // Log the fix summery
-                ::debug(format("fixType: %s, numSats: %s, accuracy: %s", mostAccFix.fixType.tostring(), mostAccFix.numSats.tostring(), mostAccFix.accuracy.tostring()));
+                ::debug(format("[Main] fixType: %s, numSats: %s, accuracy: %s", mostAccFix.fixType.tostring(), mostAccFix.numSats.tostring(), mostAccFix.accuracy.tostring()));
                 // Add to report if fix was within the reporting accuracy
                 if (mostAccFix.accuracy <= LOCATION_REPORT_ACCURACY) report.fix <- mostAccFix;
             } 
@@ -305,10 +352,10 @@ class MainController {
         readyToSend = false;
 
         // MOVEMENT DEBUGGING LOG
-        ::debug("Accel is enabled: " + move._isAccelEnabled() + ", accel int enabled: " + move._isAccelIntEnabled() + ", movement flag: " + persist.getMoveDetected());
+        ::debug("[Main] Accel is enabled: " + move._isAccelEnabled() + ", accel int enabled: " + move._isAccelIntEnabled() + ", movement flag: " + persist.getMoveDetected());
 
         // Send to agent
-        ::debug("Sending device status report to agent");
+        ::debug("[Main] Sending device status report to agent");
         local mmHandlers = {
             "onAck" : mmOnReportAck.bindenv(this),
             "onFail" : mmOnReportFail.bindenv(this)
@@ -352,14 +399,14 @@ class MainController {
         // Update report time if it has changed
         persist.setReportTime(reportTime);
 
-        ::debug("Next report time " + reportTime + ", in " + (reportTime - now) + "s");
+        ::debug("[Main] Next report time " + reportTime + ", in " + (reportTime - now) + "s");
     }
 
     function setReportTimer() {
         // Ensure only one timer is set
         cancelReportTimer();
         // Start a timer to send report if no GPS fix is found
-        reportTimer = imp.wakeup(GPS_TIMEOUT, onReportTimerExpired.bindenv(this));
+        reportTimer = imp.wakeup(LOCATION_TIMEOUT_SEC, onReportTimerExpired.bindenv(this));
     }
 
     function cancelReportTimer() {
@@ -378,7 +425,7 @@ class MainController {
         // Check if movement occurred
         // Note: Motion detected method will clear interrupt when called
         if (move.detected()) {
-            ::debug("Movement event detected");
+            ::debug("[Main] Movement event detected");
             // Store movement flag
             persist.setMoveDetected(true);
 
@@ -391,7 +438,7 @@ class MainController {
     // Assist messages written to u-blox completed
     // Logs write errors if any
     function onAssistMsgDone(errs) {
-        ::debug("Assist messages written to u-blox");
+        ::debug("[Main] Assist messages written to u-blox");
         if (errs != null) {
             foreach(err in errs) {
                 // Log errors encountered
@@ -404,7 +451,7 @@ class MainController {
     // If report timer expires before accurate GPS fix is not found,
     // disable GPS power and send report if connected
     function onReportTimerExpired() {
-        ::debug("GPS failed to get an accurate fix. Disabling GPS power.");
+        ::debug("[Main] GPS failed to get an accurate fix. Disabling GPS power.");
         PWR_GATE_EN.write(0);
 
          // Send report if connection handler has already run
@@ -417,10 +464,10 @@ class MainController {
         // We got a fix, cancel timer to send report automatically
         cancelReportTimer();
 
-        ::debug("Got fix");
+        ::debug("[Main] Got fix");
         fix = gpxFix;
 
-        ::debug("Disabling GPS power");
+        ::debug("[Main] Disabling GPS power");
         PWR_GATE_EN.write(0);
 
         // Send report if connection handler has already run
@@ -430,16 +477,16 @@ class MainController {
 
     // Stores battery status for use in report
     function onBatteryStatus(status) {
-        ::debug("Get battery status complete:")
-        ::debug("Remaining cell capacity: " + status.capacity + "mAh");
-        ::debug("Percent of battery remaining: " + status.percent + "%");
+        ::debug("[Main] Get battery status complete:")
+        ::debug("[Main] Remaining cell capacity: " + status.capacity + "mAh");
+        ::debug("[Main] Percent of battery remaining: " + status.percent + "%");
         battStatus = status;
     }
 
     // Stores temperature and humidity reading for use in report
     function onTempHumid(reading) {
-        ::debug("Get temperature and humidity complete:")
-        ::debug(format("Current Humidity: %0.2f %s, Current Temperature: %0.2f °C", reading.humidity, "%", reading.temperature));
+        ::debug("[Main] Get temperature and humidity complete:")
+        ::debug(format("C[Main] urrent Humidity: %0.2f %s, Current Temperature: %0.2f °C", reading.humidity, "%", reading.temperature));
         thReading = reading;
     }
 
@@ -459,7 +506,7 @@ class MainController {
         }
 
         local sleepTime = (wakeTime - now);
-        ::debug("Setting sleep timer: " + sleepTime + "s");
+        ::debug("[Main] Setting sleep timer: " + sleepTime + "s");
         return sleepTime;
     }
 
@@ -467,7 +514,7 @@ class MainController {
     function checkAndSleep() {
         if (shouldConnect() || lpm.isConnected()) {
             // We are connected or if report should be filed
-            if (!lpm.isConnected()) ::debug("Connecting...");
+            if (!lpm.isConnected()) ::debug("[Main] Connecting...");
             // Set timer to send report if GPS doesn't get a fix, and we are connected
             setReportTimer();
             // Connect if needed and run connection flow
@@ -488,13 +535,13 @@ class MainController {
     function powerDown() {
         // Log how long we have been awake
         local now = hardware.millis();
-        ::debug("Time since code started: " + (now - bootTime) + "ms");
-        ::debug("Going to sleep...");
+        ::debug("[Main] Time since code started: " + (now - bootTime) + "ms");
+        ::debug("[Main] Going to sleep...");
 
         local sleepTime;
         if (sleep == null) {
             sleepTime = getSleepTimer();
-            ::debug("Setting sleep timer: " + sleepTime + "s");
+            ::debug("[Main] Setting sleep timer: " + sleepTime + "s");
         }
 
         // Put device to sleep 
@@ -503,6 +550,11 @@ class MainController {
 
     // Helpers
     // -------------------------------------------------------------
+
+    function shouldGetOfflineAssist() {
+        local lastChecked = persist.getOfflineAssestChecked();
+        return (lastChecked == null || time() >= (lastChecked + OFFLINE_ASSIST_REQ_MAX));
+    }
 
 	// Overwrites currently stored wake and report times
     function overwriteStoredConnectSettings() {
@@ -518,20 +570,20 @@ class MainController {
         // is that if we change position then movement will be detected and trigger
         // a report to be generated.
         local haveMoved = persist.getMoveDetected();
-        ::debug("Movement detected: " + haveMoved);
+        ::debug("[Main] Movement detected: " + haveMoved);
         if (haveMoved) return true;
 
         // NOTE: We need a valid timestamp to determine sleep times.
         // If the imp looses all power, a connection to the server is
         // needed to get a valid timestamp.
         local validTS = validTimestamp();
-        ::debug("Valid timestamp: " + validTS);
+        ::debug("[Main] Valid timestamp: " + validTS);
         if (!validTS) return true;
 
         // Check if report time has passed
         local now = time();
         local shouldReport = (now >= persist.getReportTime());
-        ::debug("Time to send report: " + shouldReport);
+        ::debug("[Main] Time to send report: " + shouldReport);
         return shouldReport;
     }
 
