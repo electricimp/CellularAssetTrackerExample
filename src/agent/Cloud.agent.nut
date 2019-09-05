@@ -29,7 +29,6 @@ const STUBBED_GATEWAY_ID   = "test_gateway";
 const STUBBED_TYPE         = "test_type_cellular";
 
 const CLOUD_DATA_ENDPOINT  = "@{CLOUD_DATA_ENDPOINT}"; 
-const TEST_DATA_ENDPOINT   = "@{TEST_AGENT_URL}";
 
 // Manages Cloud Service Communications  
 // Dependencies: YOUR CLOUD SERVICE LIBRARY 
@@ -56,10 +55,7 @@ class Cloud {
         ::debug("[Cloud] Sending data to cloud:");
         ::debug("[Cloud] " + body);
         // Send formatted data to your cloud service
-        // req.sendasync(_onSent.bindenv(this));
-        
-        local req2 = http.post(TEST_DATA_ENDPOINT, headers, body);
-        req2.sendasync(_onSent.bindenv(this));
+        req.sendasync(_onSent.bindenv(this));
     }
 
     function _formatData(data) {
