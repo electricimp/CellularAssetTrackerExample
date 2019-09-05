@@ -60,14 +60,19 @@ const REPORT_TIME_SEC        = 900;
 
 // Force in Gs that will trigger movement interrupt
 const MOVEMENT_THRESHOLD     = 0.05;
-// Accuracy of GPS fix in meters
+// Accuracy of GPS fix in meters (Location data will only be accurate to this value, 
+// so GPS_FILTER and DISTANCE_THRESHOLD_M should be based on this value)
 const LOCATION_ACCURACY      = 10;
 // Maximum time to wait for GPS to get a fix, before trying to send report
 // NOTE: This should be less than the MAX_WAKE_TIME
 const LOCATION_TIMEOUT_SEC   = 60; 
 const OFFLINE_ASSIST_REQ_MAX = 43200; // Limit requests to every 12h (12 * 60 * 60) 
-// Distance threshold in meters (~200ft)
-const DISTANCE_THRESHOLD_M   = 60;
+// Distance threshold in meters (~100ft)
+const DISTANCE_THRESHOLD_M   = 30;
+// GPS can sometimes jump around when sitting still, use this filter to eliminate 
+// small jumps while not moving. This will also limit the number of times we calculate
+// distance.
+const GPS_FILTER             = 0.00015;
 // Constant used to validate imp's timestamp
 const VALID_TS_YEAR          = 2019;
 
@@ -75,7 +80,6 @@ const VALID_TS_YEAR          = 2019;
 const MAX_WAKE_TIME          = 65;
 // Low battery alert threshold in percentage
 const BATTERY_LOW_THRESH     = 10;
-
 
 
 class MainController {
@@ -98,6 +102,7 @@ class MainController {
     sleep                = null;
     gpsFixTimer          = null;
     reportSent           = null; 
+    checkDistance        = null;
     gettingOfflineAssist = null;
 
     constructor() {
@@ -150,6 +155,7 @@ class MainController {
         // Set tracking flag defaults
         reportSent           = false;
         gettingOfflineAssist = false;
+        checkDistance        = false;
     }
 
     // MM handlers
@@ -185,6 +191,9 @@ class MainController {
             // Toggle stored movement flag
             persist.setMoveDetected(false);
         }
+
+        // NOTE: Reporting is scheduled based purely on interval, if movement caused 
+        // report the next report will be scheduled based on when that report was sent
         updateReportingTime();
         powerDown();
     }
@@ -290,14 +299,16 @@ class MainController {
     function onMovementWake() {
         ::debug("[Main] Wake reason: " + lpm.wakeReasonDesc());
 
-        // If event valid, disables movement interrupt and store movement flag
-        onMovement();
-
-        // Sleep til next check-in time
-        // Note: To conserve battery power, after movement interrupt
-        // we are not connecting right away, we will report movement
-        // on the next scheduled check-in time
-        powerDown();
+        // Set a limit on how long we are connected
+        // Note: Setting a fixed duration to sleep here means next connection
+        // will happen in calculated time + the time it takes to complete all
+        // tasks.
+        lpm.doAsyncAndSleep(function(done) {
+            // Set sleep function
+            sleep = done;
+            // Check if we need to connect and report
+            onMovement();
+        }.bindenv(this), getSleepTimer(), MAX_WAKE_TIME);
     }
 
     // Wake up flow - triggered on all connects except interrupt or timer
@@ -425,16 +436,24 @@ class MainController {
     // Pin state change callback & on wake pin action
     // If event valid, disables movement interrupt and store movement flag
     function onMovement() {
-        // Check if movement occurred
+        // Check if new movement occurred
         // Note: Motion detected method will clear interrupt when called
         if (move.detected()) {
             ::debug("[Main] Movement event detected");
-            // Store movement flag
-            persist.setMoveDetected(true);
 
-            // If movement occurred then disable interrupt, so we will not
-            // wake again until scheduled check-in time
-            move.disable();
+            // Check distance 
+            checkDistance = true;
+            // Set timer to send report if GPS doesn't get a fix, and we are connected
+            setLocTimeout();
+            getLocation();
+
+            // TODO: track if location check fails 
+        } else {
+            // Sleep til next check-in time
+            // Note: To conserve battery power, after movement interrupt
+            // we are not connecting right away, we will report movement
+            // on the next scheduled check-in time
+            powerDown();
         }
     }
 
@@ -449,7 +468,6 @@ class MainController {
             }
         }
     }
-
 
     // If report timer expires before accurate GPS fix is not found,
     // disable GPS power and send report if connected
@@ -473,9 +491,55 @@ class MainController {
         ::debug("[Main] Disabling GPS power");
         PWR_GATE_EN.write(0);
 
-        // Send report if connection handler has already run
-        // and report has not been sent
-        if (lpm.isConnected() && !reportSent) sendReport();
+        if (checkDistance) {
+            ::debug("[Main] Movement triggered location. Check distance...");
+            // Woke on movement, check distance before reporting
+            if ("rawLat" in fix && "rawLon" in fix) {
+                local lastReportedLoc = persist.getLocation();
+
+                // no stored - can't determine distance send report
+                if (lastReportedLoc == null) {
+                    ::debug("[Main] No stored location. Scheduling report to update location...");
+                    reportMovement()
+                    return;
+                } 
+
+                ::debug("[Main] Got location in report. Filtering GPS data...");
+                local locHasChanged = loc.filterGPS(fix.rawLat, fix.rawLon, lastReportedLoc.lat, lastReportedLoc.lon, GPS_FILTER);
+                if (locHasChanged) {
+                    ::debug("[Main] Location greater than filter. Calculating distance...");
+                    ::debug("[Main] Current location: lat " + fix.rawLat + ", lon " + fix.rawLon);
+                    ::debug("[Main] Last reported location: lat " + lastReportedLoc.lat + ", lon " + lastReportedLoc.lon);
+
+                    // Param order: new lat, new lon, old lat old lon
+                    local dist = loc.calculateDistance(fix.rawLat, fix.rawLon, lastReportedLoc.lat, lastReportedLoc.lon);
+                
+                    // Report if we have moved more than the minimum distance since our last report
+                    if (dist >= DISTANCE_THRESHOLD_M) {
+                        ::debug("[Main] Distance above threshold. Scheduling report...");
+                        reportMovement();
+                        return;
+                    }
+                }
+            } else {
+                // Woke on movement, can't check distance
+                ::debug("[Main] GPS data did not have lat & lon, so can't calculate distance");
+            }
+
+            // Sleep til next check-in time
+            // Note: To conserve battery power, after movement interrupt
+            // we are not connecting right away, we will report movement
+            // on the next scheduled check-in time
+            powerDown();
+        } else {
+            // Update last reported lat & lon for calculating distance
+            if ("rawLat" in fix && "rawLon" in fix) persist.setLocation(fix.rawLat, fix.rawLon);
+
+            // Send report if connection handler has already run
+            // and report has not been sent
+            if (lpm.isConnected() && !reportSent) sendReport();
+        }
+
     }
 
     // Stores battery status for use in report
@@ -511,6 +575,18 @@ class MainController {
         local sleepTime = (wakeTime - now);
         ::debug("[Main] Setting sleep timer: " + sleepTime + "s");
         return sleepTime;
+    }
+
+    function reportMovement() {
+        // Store movement flag
+        persist.setMoveDetected(true);
+        // Connect/Run connection flow
+        // Connection handler will trigger report send
+        lpm.connect();
+        // Get sensor readings for report
+        getSensorReadings();
+        // Get battery status
+        getBattStatus();
     }
 
     // Runs a check and triggers sleep flow

@@ -117,7 +117,7 @@ class Persist {
             rt.seek(0, 'b');
             location = {};
             location.lat <- rt.readn('i');
-            location.lng <- rt.readn('i');
+            location.lon <- rt.readn('i');
         }
         
         // Return location or null if it is not found
@@ -204,9 +204,9 @@ class Persist {
         ::debug("[Persist] Report time stored: " + reportTime);
     }
 
-    function setLocation(lat, lng) {
+    function setLocation(lat, lon) {
         // Only update if location has changed
-        if (location != null && location.len() == 2 && lat == location.lat && lng == location.lng) return;
+        if (location != null && location.len() == 2 && lat == location.lat && lon == location.lon) return;
 
         // Erase outdated report time
         if (_sffs.fileExists(PERSIST_FILE_NAMES.LOCATION)) {
@@ -216,13 +216,13 @@ class Persist {
         // Update local and stored report time with the new time
         location = {
             "lat" : lat,
-            "lng" : lng
+            "lon" : lon
         };
        
         local file = _sffs.open(PERSIST_FILE_NAMES.LOCATION, "w");
-        file.write(_serializeLocation(lat, lng));
+        file.write(_serializeLocation(lat, lon));
         file.close();
-        ::debug("[Persist] Location stored lat: " + lat + ", lng: " + lng);
+        ::debug("[Persist] Location stored lat: " + lat + ", lon: " + lon);
     }
 
     function setOfflineAssistChecked(newTime) {
@@ -271,10 +271,10 @@ class Persist {
         return b;
     }
 
-    function _serializeLocation(lat, lng) {
+    function _serializeLocation(lat, lon) {
         local b = blob(8);
         b.writen(lat, 'i');
-        b.writen(lng, 'i');
+        b.writen(lon, 'i');
         b.seek(0, 'b');
         return b;
     }
@@ -341,5 +341,5 @@ class Persist {
             return true;
         }
     }
-    
+
 }

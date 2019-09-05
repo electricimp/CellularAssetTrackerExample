@@ -263,11 +263,13 @@ class Location {
 
             // Add/Update fix report values
             gpsFix.secToFix <- fixTime;
-            gpsFix.fixType <- fixType;
-            gpsFix.numSats <- payload.numSV;
-            gpsFix.lon <- UbxMsgParser.toDecimalDegreeString(payload.lon);
-            gpsFix.lat <- UbxMsgParser.toDecimalDegreeString(payload.lat);
-            gpsFix.time <- timeStr;
+            gpsFix.fixType  <- fixType;
+            gpsFix.numSats  <- payload.numSV;
+            gpsFix.rawLon   <- payload.lon;
+            gpsFix.rawLat   <- payload.lat;
+            gpsFix.lon      <- UbxMsgParser.toDecimalDegreeString(payload.lon);
+            gpsFix.lat      <- UbxMsgParser.toDecimalDegreeString(payload.lat);
+            gpsFix.time     <- timeStr;
             gpsFix.accuracy <- _getAccuracy(payload.hAcc);
 
             if (onAccFix != null) _checkAccuracy();
