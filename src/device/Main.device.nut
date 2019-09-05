@@ -294,7 +294,7 @@ class MainController {
         // No need to (re)enable movement detection, these settings
         // are stored in the accelerometer registers. Just need
         // to configure the wake pin.
-        move.configIntWake(onMovement.bindenv(this));
+        move.configIntWake();
 
         // Set a limit on how long we are connected
         // Note: Setting a fixed duration to sleep here means next connection
@@ -315,8 +315,11 @@ class MainController {
         // Get reading immediately, so closest to shock value
         getAccelReading();
 
-        // Do NOT configure Interrupt Wake Pin, so state change callback will 
-        // not trigger a second onMovement process
+        // Configure Interrupt Wake Pin
+        // No need to (re)enable movement detection, these settings
+        // are stored in the accelerometer registers. Just need
+        // to configure the wake pin.
+        move.configIntWake();
 
         // Set a limit on how long we are connected
         // Note: Setting a fixed duration to sleep here means next connection
@@ -335,7 +338,7 @@ class MainController {
         ::debug("[Main] Wake reason: " + lpm.wakeReasonDesc());
 
         // Enable movement monitor
-        move.enable(MOVEMENT_THRESHOLD, onMovement.bindenv(this));
+        move.enable(MOVEMENT_THRESHOLD);
 	    // NOTE: overwriteStoredConnectSettings method only needed if CHECK_IN_TIME_SEC
         // and/or REPORT_TIME_SEC have been changed - leave this while in development
         overwriteStoredConnectSettings();

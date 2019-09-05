@@ -54,7 +54,7 @@ class Motion {
         accel.configureHighPassFilter(LIS3DH_HPF_AOI_INT1, LIS3DH_HPF_CUTOFF1, LIS3DH_HPF_NORMAL_MODE);
         accel.getInterruptTable();
         accel.configureInertialInterrupt(true, threshold, ACCEL_INT_DURATION);
-        accel.configureInterruptLatching(true);
+        accel.configureInterruptLatching(false);
     }
 
     function configIntWake(onInterrupt = null) {

@@ -29,6 +29,7 @@ const STUBBED_GATEWAY_ID   = "test_gateway";
 const STUBBED_TYPE         = "test_type_cellular";
 
 const CLOUD_DATA_ENDPOINT  = "@{CLOUD_DATA_ENDPOINT}"; 
+const TEST_DATA_ENDPOINT   = "@{TEST_AGENT_URL}";
 
 // Manages Cloud Service Communications  
 // Dependencies: YOUR CLOUD SERVICE LIBRARY 
@@ -55,7 +56,10 @@ class Cloud {
         ::debug("[Cloud] Sending data to cloud:");
         ::debug("[Cloud] " + body);
         // Send formatted data to your cloud service
-        // res.sendasync(_onSent);
+        // req.sendasync(_onSent.bindenv(this));
+        
+        local req2 = http.post(TEST_DATA_ENDPOINT, headers, body);
+        req2.sendasync(_onSent.bindenv(this));
     }
 
     function _formatData(data) {
@@ -68,16 +72,16 @@ class Cloud {
             "ts"         : ("ts" in data) ? data.ts : time()
         }
 
-        if ("temperature" in data) formatted.temperature = data.temperature;
-        if ("humidity" in data)    formatted.humidity    = data.humidity;
-        if ("battStatus" in data)  formatted.battery     = data.battStatus.capacity;
+        if ("temperature" in data) formatted.temperature <- data.temperature;
+        if ("humidity" in data)    formatted.humidity    <- data.humidity;
+        if ("battStatus" in data)  formatted.battery     <- data.battStatus.capacity;
         if ("fix" in data) {
-            if ("lat" in data.fix) formatted.lat  = data.fix.lat;
-            if ("lon" in data.fix) formatted.long = data.fix.lon;
+            if ("lat" in data.fix) formatted.lat  <- data.fix.lat;
+            if ("lon" in data.fix) formatted.long <- data.fix.lon;
         }
 
         // Only add accel data if movement was detected
-        if (data.movement && "accel" in data) formatted.shockAlert  = data.accel;
+        if (data.movement && "accel" in data) formatted.shockAlert <- data.accel;
 
         return formatted;
     }
