@@ -91,7 +91,6 @@ class MainController {
         ::debug("--------------------------------------------------------------");
 
         // Send device data to cloud service
-        // NOTE: Cloud service send is an empty function
         cloud.send(report);
     }
 

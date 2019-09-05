@@ -313,7 +313,7 @@ class MainController {
         ::debug("[Main] Wake reason: " + lpm.wakeReasonDesc());
         
         // Get reading immediately, so closest to shock value
-        getAccelReading(onAccel);
+        getAccelReading();
 
         // Do NOT configure Interrupt Wake Pin, so state change callback will 
         // not trigger a second onMovement process
