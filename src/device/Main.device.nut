@@ -53,33 +53,39 @@
 // Main Application
 // -----------------------------------------------------------------------
 
-// Wake every x seconds to check if report should be sent
-const CHECK_IN_TIME_SEC      = 300;
-// Wake every x seconds to send a report, regaurdless of check results
-const REPORT_TIME_SEC        = 900;
+// Wake every x seconds to check if report should be sent (sleep time is base on this)
+const CHECK_IN_TIME_SEC        = 300;
+// Wake every x seconds to send a report, regaurdless of check results (reports are sent based on this)
+const REPORT_TIME_SEC          = 300;
 
 // Force in Gs that will trigger movement interrupt
-const MOVEMENT_THRESHOLD     = 0.05;
-// Accuracy of GPS fix in meters (Location data will only be accurate to this value, 
-// so GPS_FILTER and DISTANCE_THRESHOLD_M should be based on this value)
-const LOCATION_ACCURACY      = 10;
+const MOVEMENT_THRESHOLD       = 0.05;
+// Accuracy of GPS fix in meters. GPS will be powered off when this value is met.
+// (Location data will only be accurate to this value, so GPS_FILTER and
+//  DISTANCE_THRESHOLD_M should be based on this value)
+const LOCATION_ACCURACY        = 10;
+// Accuracy of GPS fix in meters. If fix did not meet LOCATION_ACCURACY, but did
+// meet LOCATION_REPORT_ACCURACY, add it to report anyway.
+const LOCATION_REPORT_ACCURACY = 15;
 // Maximum time to wait for GPS to get a fix, before trying to send report
 // NOTE: This should be less than the MAX_WAKE_TIME
-const LOCATION_TIMEOUT_SEC   = 60; 
-const OFFLINE_ASSIST_REQ_MAX = 43200; // Limit requests to every 12h (12 * 60 * 60) 
-// Distance threshold in meters (~100ft)
-const DISTANCE_THRESHOLD_M   = 30;
+const LOCATION_TIMEOUT_SEC     = 60; 
+// Limit requests to UBlox Offline assist 
+// From datasheet - data updated every 12/24h (12 * 60 * 60 = 43200) 
+const OFFLINE_ASSIST_REQ_MAX   = 43200; 
+// Distance threshold in meters (30M, ~100ft)
+const DISTANCE_THRESHOLD_M     = 30;
 // GPS can sometimes jump around when sitting still, use this filter to eliminate 
-// small jumps while not moving. This will also limit the number of times we calculate
-// distance.
-const GPS_FILTER             = 0.00015;
+// small jumps while in the same location. This will also limit the number of 
+// times we calculate distance.
+const GPS_FILTER               = 0.00015;
 // Constant used to validate imp's timestamp
-const VALID_TS_YEAR          = 2019;
+const VALID_TS_YEAR            = 2019;
 
 // Maximum time to stay awake
-const MAX_WAKE_TIME          = 65;
+const MAX_WAKE_TIME            = 65;
 // Low battery alert threshold in percentage
-const BATTERY_LOW_THRESH     = 10;
+const BATTERY_LOW_THRESH       = 10;
 
 
 class MainController {
@@ -96,6 +102,7 @@ class MainController {
     fix                  = null;
     battStatus           = null;
     thReading            = null;
+    accelReading         = null;
 
     // Application Variables
     bootTime             = null;
@@ -126,7 +133,10 @@ class MainController {
         ::debug("--------------------------------------------------------------------------");
         ::debug("[Main] Device started...");
         ::debug(imp.getsoftwareversion());
-        ::debug("--------------------------------------------------------------------------");       PWR_GATE_EN.configure(DIGITAL_OUT, 0);
+        ::debug("--------------------------------------------------------------------------");       
+        
+        // Configure Power Gate pin to disabled state
+        PWR_GATE_EN.configure(DIGITAL_OUT, 0);
 
         // Initialize movement tracker, boolean to configure i2c in Motion constructor
         // NOTE: This does NOT configure/enable/disable movement tracker
@@ -191,6 +201,9 @@ class MainController {
             // Toggle stored movement flag
             persist.setMoveDetected(false);
         }
+
+        // All other report values are not persisted and so will be reset when we 
+        // power down.
 
         // NOTE: Reporting is scheduled based purely on interval, if movement caused 
         // report the next report will be scheduled based on when that report was sent
@@ -298,6 +311,12 @@ class MainController {
     // Wake up on interrupt flow
     function onMovementWake() {
         ::debug("[Main] Wake reason: " + lpm.wakeReasonDesc());
+        
+        // Get reading immediately, so closest to shock value
+        getAccelReading(onAccel);
+
+        // Do NOT configure Interrupt Wake Pin, so state change callback will 
+        // not trigger a second onMovement process
 
         // Set a limit on how long we are connected
         // Note: Setting a fixed duration to sleep here means next connection
@@ -348,10 +367,16 @@ class MainController {
         }
 
         if (battStatus != null) report.battStatus <- battStatus;
+        
         if (thReading != null) {
             report.temperature <- thReading.temperature;
             report.humidity    <- thReading.humidity;
         }
+        
+        if (accelReading != null) {
+            report.accel <- accelReading;
+        }
+
         if (fix != null) {
             report.fix <- fix;
         } else {
@@ -401,6 +426,10 @@ class MainController {
         // Initialize Environmental Monitor without configuring i2c
         local env = Env();
         env.getTempHumid(onTempHumid.bindenv(this));
+    }
+
+    function getAccelReading() {
+        move.getAccelReading(onAccel.bindenv(this));
     }
 
     // Updates report time
@@ -485,7 +514,7 @@ class MainController {
         // We got a fix, cancel timer to send report automatically
         cancelLocTimeout();
 
-        ::debug("[Main] Got fix");
+        ::debug("[Main] Got accurate fix");
         fix = gpxFix;
 
         ::debug("[Main] Disabling GPS power");
@@ -497,14 +526,14 @@ class MainController {
             if ("rawLat" in fix && "rawLon" in fix) {
                 local lastReportedLoc = persist.getLocation();
 
-                // no stored - can't determine distance send report
+                // No stored location - can't determine distance, so send report 
                 if (lastReportedLoc == null) {
                     ::debug("[Main] No stored location. Scheduling report to update location...");
                     reportMovement()
                     return;
                 } 
 
-                ::debug("[Main] Got location in report. Filtering GPS data...");
+                ::debug("[Main] Verified lat and lon in location data. Filtering GPS data...");
                 local locHasChanged = loc.filterGPS(fix.rawLat, fix.rawLon, lastReportedLoc.lat, lastReportedLoc.lon, GPS_FILTER);
                 if (locHasChanged) {
                     ::debug("[Main] Location greater than filter. Calculating distance...");
@@ -521,6 +550,7 @@ class MainController {
                         return;
                     }
                 }
+                ::debug("[Main] Location did not change significantly.");
             } else {
                 // Woke on movement, can't check distance
                 ::debug("[Main] GPS data did not have lat & lon, so can't calculate distance");
@@ -530,6 +560,7 @@ class MainController {
             // Note: To conserve battery power, after movement interrupt
             // we are not connecting right away, we will report movement
             // on the next scheduled check-in time
+            ::debug("[Main] Powering down.");
             powerDown();
         } else {
             // Update last reported lat & lon for calculating distance
@@ -553,8 +584,17 @@ class MainController {
     // Stores temperature and humidity reading for use in report
     function onTempHumid(reading) {
         ::debug("[Main] Get temperature and humidity complete:")
-        ::debug(format("C[Main] urrent Humidity: %0.2f %s, Current Temperature: %0.2f °C", reading.humidity, "%", reading.temperature));
+        ::debug(format("[Main] Current Humidity: %0.2f %s, Current Temperature: %0.2f °C", reading.humidity, "%", reading.temperature));
         thReading = reading;
+    }
+
+    function onAccel(reading) {
+        ::debug("[Main] Get accelerometer reading complete:");
+        local x = reading.x;
+        local y = reading.y;
+        local z = reading.z;
+        ::debug(format("[Main] Acceleration (G): %0.2f, %0.2f, %0.2f", x, y, z));
+        accelReading = math.sqrt((x * x) + (y * y) + (z * z));
     }
 
     // Sleep Management
@@ -603,6 +643,8 @@ class MainController {
             getSensorReadings();
             // Get battery status
             getBattStatus();
+            // Get accelerometer reading for report
+            getAccelReading();
         } else {
             // Go to sleep
             powerDown();

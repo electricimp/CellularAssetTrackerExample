@@ -97,6 +97,26 @@ class Motion {
         return res.int1;
     }
 
+    function getAccelReading(cb) {
+        if (_isAccelEnabled()) {
+            local r = accel.getAccel();
+            if ("x" in r && "y" in r && "z" in r) cb(r);
+        } else {
+            // Enable accel
+            accel.setDataRate(ACCEL_DATA_RATE);
+            accel.enable(true);
+            // Give time for at least one reading to happen
+            local odr = 1.0 / ACCEL_DATA_RATE;
+            imp.wakeup(odr, function() {
+                local r = accel.getAccel();
+                if ("x" in r && "y" in r && "z" in r) cb(r);
+                // Disable accel
+                accel.setDataRate(0);
+                accel.enable(false);
+            }.bindenv(this));
+        }
+    }
+
         // Helper returns bool if accel is enabled
     function _isAccelEnabled() {
         // bits 0-2 xyz enabled, 3 low-power enabled, 4-7 data rate
