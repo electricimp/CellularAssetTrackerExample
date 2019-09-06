@@ -6,7 +6,7 @@ This repository contains examples of low power asset tracking applications.
 
 This example provides software to drive a low-power cellular asset tracker. The tracker monitors for movement; if movement is detected, the tracker will report daily, otherwise the device will report once a week sending GPS location, battery status and movement status.
 
-## [LowPoserLocationTracker](./LowPoserLocationTracker) ##
+## [LowPowerLocationTracker](./LowPowerLocationTracker) ##
 
 This example provides software to drive a low-power cellular asset tracker. The tracker monitors for movement; if movement is detected, the tracker will report if the location has changed, otherwise the device will report at a set interval sending GPS location, battery status, temperature, humidity and movement status.
 
