@@ -60,6 +60,8 @@ const REPORT_TIME_SEC          = 300;
 
 // Force in Gs that will trigger movement interrupt
 const MOVEMENT_THRESHOLD       = 0.05;
+// Force in Gs that will trigger shock report
+const SHOCK_THRESHOLD          = 2.0;
 // Accuracy of GPS fix in meters. GPS will be powered off when this value is met.
 // (Location data will only be accurate to this value, so GPS_FILTER and
 //  DISTANCE_THRESHOLD_M should be based on this value)
@@ -526,6 +528,12 @@ class MainController {
         if (checkDistance) {
             ::debug("[Main] Movement triggered location. Check distance...");
             // Woke on movement, check distance before reporting
+            if (accelReading != null && accelReading >= SHOCK_THRESHOLD) {
+                ::debug("[Main] Shock detected. Schedule report");
+                reportMovement();
+                return;
+            }
+
             if ("rawLat" in fix && "rawLon" in fix) {
                 local lastReportedLoc = persist.getLocation();
 
