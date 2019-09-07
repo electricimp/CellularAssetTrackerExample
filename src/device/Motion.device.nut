@@ -99,8 +99,8 @@ class Motion {
 
     function getAccelReading(cb) {
         if (_isAccelEnabled()) {
-            local r = accel.getAccel();
-            if ("x" in r && "y" in r && "z" in r) cb(r);
+            local r = _sample();
+            cb(r);
         } else {
             // Enable accel
             accel.setDataRate(ACCEL_DATA_RATE);
@@ -108,13 +108,26 @@ class Motion {
             // Give time for at least one reading to happen
             local odr = 1.0 / ACCEL_DATA_RATE;
             imp.wakeup(odr, function() {
-                local r = accel.getAccel();
-                if ("x" in r && "y" in r && "z" in r) cb(r);
+                local r = _sample();
+                cb(r);
                 // Disable accel
                 accel.setDataRate(0);
                 accel.enable(false);
             }.bindenv(this));
         }
+    }
+
+    function _sample() {
+        local max = 0;
+        for(local i = 0; i < 32; i++) {
+            local r = accel.getAccel();
+            local x = r.x;
+            local y = r.y;
+            local z = r.z;
+            r = math.sqrt(x*x + y*y + z*z);
+            if (r > max) max = r;
+        }
+        return max;
     }
 
         // Helper returns bool if accel is enabled

@@ -593,11 +593,8 @@ class MainController {
 
     function onAccel(reading) {
         ::debug("[Main] Get accelerometer reading complete:");
-        local x = reading.x;
-        local y = reading.y;
-        local z = reading.z;
-        ::debug(format("[Main] Acceleration (G): %0.2f, %0.2f, %0.2f", x, y, z));
-        accelReading = math.sqrt((x * x) + (y * y) + (z * z));
+        ::debug(format("[Main] Acceleration (G): %0.2f", reading));
+        accelReading = reading;
     }
 
     // Sleep Management
