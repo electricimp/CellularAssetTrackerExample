@@ -126,6 +126,7 @@ class Motion {
             local z = r.z;
             r = math.sqrt(x*x + y*y + z*z);
             if (r > max) max = r;
+            imp.sleep(0.003); 
         }
         return max;
     }
