@@ -8,7 +8,7 @@ This example provides software to drive a low-power cellular asset tracker. The 
 
 ## [LowPowerLocationTracker](./LowPowerLocationTracker) ##
 
-This example provides software to drive a low-power cellular asset tracker. The tracker monitors for movement; if movement is detected, the tracker will report if the location has changed, otherwise the device will report at a set interval sending GPS location, battery status, temperature, humidity and movement status.
+This example provides software to drive a low-power cellular asset tracker. The tracker monitors temperature, humidity and battery. If any readings are out of range a report will be generated and sent to the cloud immediately. The tracker also monitors movement. When movement is detected, the tracker will check if the location has changed, and if so then report the new location. If no out of range readings or location changes are detected the tracker will generate a report daily.
 
 ## Common Configuration ##
 
