@@ -36,16 +36,41 @@ class Env {
         th = HTS221(SENSOR_I2C, TEMP_HUMID_ADDR);
     }
 
+    // Takes a reading and passes result to callback 
     function getTempHumid(cb) {
         th.setMode(HTS221_MODE.ONE_SHOT);
         // Trigger callback only if we get a reading.
         th.read(function(res) {
             if ("error" in res) {
                 ::error("Temperature/Humidity reading error: " + res.error);
+                cb(null);
             } else {
                 cb(res);
             }
         }.bindenv(this))
+    }
+
+    // Takes a reading and checks that it is in range
+    // Passes a table with readings, boolean if in readings range, and time to callback
+    function checkTempHumid(tMin, tMax, hMin, hMax, cb) {
+        getTempHumid(function(res) {
+            if ("error" in res || !("temperature" in res) || !("humidity" in res)) {
+                ::error("Temperature/Humidity reading error: " + res.error);
+                cb(null);
+            } else {
+                local alert = res;
+                alert.tempAlert  <- _checkReading(res.temperature, tMin, tMax);
+                alert.humidAlert <- _checkReading(res.humidity, hMin, hMax);
+                alert.ts         <- time();
+                cb(alert);
+            }
+        }.bindenv(this))
+    }
+
+    function _checkReading(reading, min, max) {
+        if (reading < min) return ALERT_DESC.LOW;
+        if (reading > max) return ALERT_DESC.HIGH;
+        return ALERT_DESC.IN_RANGE;
     }
     
 }

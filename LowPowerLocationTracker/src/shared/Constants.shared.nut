@@ -25,11 +25,26 @@
 // Shared Agent/Device constants
 
 // Messaging Names
-const MM_ASSIST = "assist";
-const MM_REPORT = "report";
+const MSG_ASSIST = "assist";
+const MSG_REPORT = "report";
 
 // Assist Now Shared Message Types
 enum ASSIST_TYPE {
     OFFLINE,
     ONLINE
+}
+
+enum ALERT_TYPE {
+    TEMP_LOW,
+    TEMP_HIGH,
+    HUMID_LOW,
+    HUMID_HIGH,
+    BATTERY_LOW,
+    SHOCK
+}
+
+enum ALERT_DESC {
+    IN_RANGE,
+    LOW,
+    HIGH
 }

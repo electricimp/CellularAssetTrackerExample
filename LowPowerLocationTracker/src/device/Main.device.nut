@@ -25,15 +25,18 @@
 // Device Main Application File
 
 // Libraries
-#require "UBloxM8N.device.lib.nut:1.0.1"
-#require "UbxMsgParser.lib.nut:2.0.0"
-#require "LIS3DH.device.lib.nut:2.0.2"
-#require "HTS221.device.lib.nut:2.0.1"
 #require "SPIFlashFileSystem.device.lib.nut:2.0.0"
 #require "ConnectionManager.lib.nut:3.1.1"
-#require "MessageManager.lib.nut:2.4.0"
+#require "Messenger.lib.nut:0.1.0"
 #require "LPDeviceManager.device.lib.nut:0.1.0"
+#require "Promise.lib.nut:4.0.0"
+// GPS Libraries
+#require "UBloxM8N.device.lib.nut:1.0.1"
+#require "UbxMsgParser.lib.nut:2.0.0"
 #require "UBloxAssistNow.device.lib.nut:0.1.0"
+// Sensor Libraries
+#require "LIS3DH.device.lib.nut:2.0.2"
+#require "HTS221.device.lib.nut:2.0.1"
 // Battery Charger/Fuel Gauge Libraries
 #require "MAX17055.device.lib.nut:1.0.1"
 #require "BQ25895.device.lib.nut:3.0.0"
@@ -45,6 +48,7 @@
 @include __PATH__ + "/../shared/Logger.shared.nut"
 @include __PATH__ + "/../shared/Constants.shared.nut"
 @include __PATH__ + "/Persist.device.nut"
+@include __PATH__ + "/Alerts.device.nut"
 @include __PATH__ + "/Location.device.nut"
 @include __PATH__ + "/Motion.device.nut"
 @include __PATH__ + "/Battery.device.nut"
@@ -53,10 +57,17 @@
 // Main Application
 // -----------------------------------------------------------------------
 
-// Wake every x seconds to check if report should be sent (sleep time is base on this)
-const CHECK_IN_TIME_SEC        = 300;
-// Wake every x seconds to send a report, regaurdless of check results (reports are sent based on this)
-const REPORT_TIME_SEC          = 300;
+// Wake every x seconds to check sensors for alert conditions (sleep time is base on this)
+const CHECK_IN_TIME            = 60;
+// Send a report, regaurdless of check/alert conditions
+const REPORT_TIME_SEC          = 86400;
+
+// Constant used to validate imp's timestamp
+const VALID_TS_YEAR            = 2019;
+// Maximum time to stay awake (Should be greater than LOCATION_TIMEOUT_SEC)
+const MAX_WAKE_TIME            = 65;
+// Max time to wait for agent/device message ack
+const MSG_ACK_TIMEOUT          = 10;
 
 // Force in Gs that will trigger movement interrupt
 const MOVEMENT_THRESHOLD       = 0.05;
@@ -79,38 +90,41 @@ const DISTANCE_THRESHOLD_M     = 30;
 // small jumps while in the same location. This will also limit the number of 
 // times we calculate distance.
 const GPS_FILTER               = 0.00015;
-// Constant used to validate imp's timestamp
-const VALID_TS_YEAR            = 2019;
 
-// Maximum time to stay awake
-const MAX_WAKE_TIME            = 65;
 // Low battery alert threshold in percentage
-const BATTERY_LOW_THRESH       = 10;
+const BATTERY_THRESH_LOW       = 10;
+// Temperature above alert threshold in deg C will trigger alert
+const TEMP_THRESHOLD_HIGH      = 30;
+// Temperature below alert threshold in deg C will trigger alert
+const TEMP_THRESHOLD_LOW       = 5;
+// Humidity above alert threshold will trigger alert
+const HUMID_THRESHOLD_HIGH     = 90;
+// Humidity below alert threshold will trigger alert
+const HUMID_THRESHOLD_LOW      = 0;
+// Force in Gs that will trigger impact alert
+const IMPACT_THRESHOLD       = 1.5;
 
 
 class MainController {
 
     // Supporting CLasses
     cm                   = null;
-    mm                   = null;
+    msgr                 = null;
     lpm                  = null;
     move                 = null;
     loc                  = null;
     persist              = null;
 
-    // Report Values
-    fix                  = null;
-    battStatus           = null;
-    thReading            = null;
-    accelReading         = null;
-
     // Application Variables
     bootTime             = null;
-    sleep                = null;
     gpsFixTimer          = null;
-    reportSent           = null; 
-    checkDistance        = null;
+    maxWakeTimer         = null;
+    movementTimeout      = null;
+
+    // Flags 
+    haveAccFix           = null;
     gettingOfflineAssist = null;
+    // checkDistance        = null;
 
     constructor() {
         // Get boot timestamp
@@ -155,87 +169,92 @@ class MainController {
         lpm = LPDeviceManager(cm, handlers);
 
         // Set connection callbacks
-        lpm.onConnect(onConnect.bindenv(this));
+        cm.onConnect(onConnect.bindenv(this));
         cm.onTimeout(onConnTimeout.bindenv(this));
 
-        // Initialize Message Manager for agent/device communication
-        mm = MessageManager({"connectionManager" : cm});
-        mm.onTimeout(mmOnTimeout.bindenv(this));
+        // Initialize Messenger for agent/device communication 
+        // Defaults: message ackTimeout set to 10s, max num msgs 10, default msg ids
+        msgr = Messenger({"ackTimeout" : MSG_ACK_TIMEOUT});
+        msgr.onFail(msgrOnFail.bindenv(this));
+        msgr.onAck(msgrOnAck.bindenv(this));
 
         // Set tracking flag defaults
-        reportSent           = false;
         gettingOfflineAssist = false;
-        checkDistance        = false;
     }
 
-    // MM handlers
+    // Msgr handlers
     // -------------------------------------------------------------
 
-    // Global MM Timeout handler
-    function mmOnTimeout(msg, wait, fail) {
-        ::debug("[Main] MM message timed out");
-        fail();
-    }
+    // Global Message Failure handler
+    function msgrOnFail(msg, reason) {
+        // Store message info in variables
+        local payload = message.payload;
+        local id      = payload.id;
+        local name    = payload.name;
+        local msgData = payload.data;
 
-    // MM onFail handler for report
-    function mmOnReportFail(msg, err, retry) {
-        ::error("[Main] Report send failed");
-        powerDown();
-    }
+        ::error(format("[Main] %s message send failed: %s", name, reason));
 
-    // MM onFail handler for assist messages
-    function mmOnAssistFail(msg, err, retry) {
-        ::error("[Main] Request for assist messages failed, retrying");
-        retry();
-    }
-
-    // MM onAck handler for report
-    function mmOnReportAck(msg) {
-        // Report successfully sent
-        ::debug("[Main] Report ACK received from agent");
-
-        // Clear & reset movement detection
-        if (persist.getMoveDetected()) {
-            // Re-enable movement detection
-            move.enable(MOVEMENT_THRESHOLD, onMovement.bindenv(this));
-            // Toggle stored movement flag
-            persist.setMoveDetected(false);
+        // Handle each type of message failure
+        switch(name) {
+            case MSG_ASSIST:
+                // If first message fails, then don't wait for offline 
+                // messages before sleeping.
+                if (msgData == ASSIST_TYPE.OFFLINE) gettingOfflineAssist = false;
+                ::debug(format("Main] Retrying %s message send.", name));
+                // Retry message 
+                msgr.send(name, msgData);
+                break;
+            case MSG_REPORT:
+                powerDown();
+                break;
         }
-
-        // All other report values are not persisted and so will be reset when we 
-        // power down.
-
-        // NOTE: Reporting is scheduled based purely on interval, if movement caused 
-        // report the next report will be scheduled based on when that report was sent
-        updateReportingTime();
-        powerDown();
     }
 
-    // MM onReply handler for assist messages
-    function mmOnAssist(msg, response) {
-        if (response == null) {
+    function msgrOnAck(msg, ackData) {
+        // Store message info in variables
+        local payload = message.payload;
+        local id      = payload.id;
+        local name    = payload.name;
+        local msgData = payload.data;
+
+        // Handle each type of message failure
+        switch(name) {
+            case MSG_ASSIST:
+                onAssistAck(msgData, ackData);
+                break;
+            case MSG_REPORT:
+                onReportAck(msgData);
+                break;
+        }
+    }
+
+    // Msgr assist messages ACK handler
+    function onAssistAck(type, ackData) {
+        if (ackData == null) {
             ::debug("[Main] Didn't receive any Assist messages from agent.");
             return;
         }
 
-        // Response contains assist messages from cloud
-        local assistMsgs = response;
+        // ackData contains assist messages from cloud
+        local assistMsgs = ackData;
 
-        if (msg.payload.data == ASSIST_TYPE.OFFLINE) {
+        if (type == ASSIST_TYPE.OFFLINE) {
             ::debug("[Main] Offline assist messages received from agent");
 
             // Store all offline assist messages by date
-            persist.storeAssist(response);
+            persist.storeAssist(ackData);
             // Update time we last checked
             persist.setOfflineAssistChecked(time());
-            // Offline assist messages stored, toggle flag
+            // Offline assist messages stored, toggle flag that lets device know 
+            // if is clear to sleep
             gettingOfflineAssist = false;
 
             // Get today's date string/file name
             local todayFileName = Location.getAssistDateFileName();
             // Select today's offline assist messages only
-            if (todayFileName in response) {
-                assistMsgs = response.todayFileName;
+            if (todayFileName in ackData) {
+                assistMsgs = ackData.todayFileName;
                 ::debug("[Main] Writing offline assist messages to u-blox");
             } else {
                 ::debug("[Main] No offline assist messges for today. No messages written to UBLOX.");
@@ -249,34 +268,58 @@ class MainController {
         if (PWR_GATE_EN.read() && loc) loc.writeAssistMsgs(assistMsgs, onAssistMsgDone.bindenv(this));
     }
 
-    // Connection & Connection Flow Handlers
+    // Msgr report ACK handler
+    function onReportAck(report) {
+        // Report successfully sent
+        ::debug("[Main] Report ACK received from agent");
+
+        // Clear movement detection flag
+        if (persist.getMoveDetected()) {
+            // Toggle stored movement flag
+            persist.setMoveDetected(false);
+        }
+
+        // Toggle all alert reported flags to true
+        clearAlerts();
+
+        // Update last reported lat & lon for calculating distance
+        if ("fix" in report && "rawLat" in report.fix && "rawLon" in report.fix) {
+            persist.setLocation(fix.rawLat, fix.rawLon);
+        }
+
+        // All other report values are not persisted and so will be reset when we 
+        // power down.
+
+        // NOTE: Reporting is scheduled based purely on interval, if movement caused 
+        // report the next report will be scheduled based on when that report was sent
+        updateReportingTime();
+        powerDown();
+    }
+
+    // Connection Handlers
     // -------------------------------------------------------------
 
     // Connection Flow
     function onConnect() {
         ::debug("[Main] Device connected...");
 
-        // Configure UBLOX Assist message handlers
-        local mmHandlers = {
-            "onReply" : mmOnAssist.bindenv(this),
-            "onFail"  : mmOnAssistFail.bindenv(this)
-        };
-
         if (shouldGetOfflineAssist()) {
             gettingOfflineAssist = true;
             // Refresh offline assist messages
             ::debug("[Main] Requesting offline assist messages from agent/Assist Now.");
-            mm.send(MM_ASSIST, ASSIST_TYPE.OFFLINE, mmHandlers);
+            msgr.send(MM_ASSIST, ASSIST_TYPE.OFFLINE);
         }
 
         // Note: We are only checking for GPS fix, The assumption is that an accurate GPS fix will
         // take longer than getting battery status, env readings etc.
-        if (fix != null) {
-            sendReport();
-        } else {
+        // haveAccFix flag states: 
+            // null  = not looking for location, 
+            // false = getting location/but not complete,
+            // true  = getting location & have an accurate fix 
+        if (haveAccFix == false) {
             // We don't have a fix, request assist online data
             ::debug("[Main] Requesting online assist messages from agent/Assist Now.");
-            mm.send(MM_ASSIST, ASSIST_TYPE.ONLINE, mmHandlers);
+            msgr.send(MM_ASSIST, ASSIST_TYPE.ONLINE);
         }
     }
 
@@ -286,207 +329,245 @@ class MainController {
         powerDown();
     }
 
+    // Wake up flow - triggered on all connects except interrupt or timer
+    function onBoot(wakereson) {
+        ::debug("[Main] Wake reason: " + lpm.wakeReasonDesc());
+
+        // Set a limit on how long we are awake for, sets a timer that triggers 
+        // powerDown/sleep
+        setMaxWakeTimeout();
+
+	    // NOTE: overwriteStoredConnectSettings method persistes the current time as the
+        // next check-in and report time. This is only needed if CHECK_IN_TIME_SEC
+        // and/or REPORT_TIME_SEC have been changed - leave this while in development. 
+        overwriteStoredConnectSettings();
+
+        // Enable movement monitor
+        move.enable(MOVEMENT_THRESHOLD, onMovePinStateChange.bindenv(this));
+
+        // Check if report needed or if we are just checking for env/battery alerts 
+        shouldReport()
+            .then(reportingFlow.bindenv(this), alertCheckFlow.bindenv(this));
+    }
+
     // Wake up on timer flow
     function onScheduledWake() {
         ::debug("[Main] Wake reason: " + lpm.wakeReasonDesc());
+
+        // Set a limit on how long we are awake for, sets a timer that triggers 
+        // powerDown/sleep
+        setMaxWakeTimeout();
 
         // Configure Interrupt Wake Pin
         // No need to (re)enable movement detection, these settings
         // are stored in the accelerometer registers. Just need
         // to configure the wake pin.
-        move.configIntWake();
+        // TODO: Sort out callback
+        move.configIntWake(onMovePinStateChange.bindenv(this));
 
-        // Set a limit on how long we are connected
-        // Note: Setting a fixed duration to sleep here means next connection
-        // will happen in calculated time + the time it takes to complete all
-        // tasks.
-        lpm.doAsyncAndSleep(function(done) {
-            // Set sleep function
-            sleep = done;
-            // Check if we need to connect and report
-            checkAndSleep();
-        }.bindenv(this), getSleepTimer(), MAX_WAKE_TIME);
+        // Check if report needed or if we are just checking for env/battery alerts 
+        shouldReport()
+            .then(reportingFlow.bindenv(this), alertCheckFlow.bindenv(this));
     }
 
     // Wake up on interrupt flow
     function onMovementWake() {
         ::debug("[Main] Wake reason: " + lpm.wakeReasonDesc());
-        
-        // Get reading immediately, so closest to shock value
-        getAccelReading();
+
+        // Get reading immediately
+        // NOTE: This is blocking on purpose to try to catch shock value
+        local impactAlert = move.checkImpact(IMPACT_THRESHOLD);
+
+        // Set a limit on how long we are awake for, sets a timer that triggers 
+        // powerDown/sleep
+        setMaxWakeTimeout();
+
+        // Prevent multiple location movement events from processing
+        setMovementTimeout();
 
         // Configure Interrupt Wake Pin
         // No need to (re)enable movement detection, these settings
         // are stored in the accelerometer registers. Just need
         // to configure the wake pin.
-        move.configIntWake();
+        move.configIntWake(onMovePinStateChange.bindenv(this));
 
-        // Set a limit on how long we are connected
-        // Note: Setting a fixed duration to sleep here means next connection
-        // will happen in calculated time + the time it takes to complete all
-        // tasks.
-        lpm.doAsyncAndSleep(function(done) {
-            // Set sleep function
-            sleep = done;
-            // Check if we need to connect and report
-            onMovement();
-        }.bindenv(this), getSleepTimer(), MAX_WAKE_TIME);
+        // This releases int pin if it is latched
+        local moved             = move.detected();
+        local alerts            = persist.getAlerts();
+        local impactAlrtUpdated = AlertManager.checkImpactAlert(alerts, impactAlert);
+        
+        // If we have not detected movemnt or impact alert then power down
+        if (!moved && !impactAlrtUpdated) {
+            powerDown();
+            return;
+        }
+        
+        // Set movement flag if needed
+        if (moved) persist.setMoveDetected(true);
+
+        // Get location and calculate distance to see if we have moved 
+        movementCheckFlow(impactAlert);
     }
 
-    // Wake up flow - triggered on all connects except interrupt or timer
-    function onBoot(wakereson) {
-        ::debug("[Main] Wake reason: " + lpm.wakeReasonDesc());
-
-        // Enable movement monitor
-        move.enable(MOVEMENT_THRESHOLD);
-	    // NOTE: overwriteStoredConnectSettings method only needed if CHECK_IN_TIME_SEC
-        // and/or REPORT_TIME_SEC have been changed - leave this while in development
-        overwriteStoredConnectSettings();
-
-        // Send report if connected or alert condition noted, then sleep
-        // Set a limit on how long we are connected
-        // Note: Setting a fixed duration to sleep here means next connection
-        // will happen in calculated time + the time it takes to complete all
-        // tasks.
-        lpm.doAsyncAndSleep(function(done) {
-            // Set sleep function
-            sleep = done;
-            // Check if we need to connect and report
-            checkAndSleep();
-        }.bindenv(this), getSleepTimer(), MAX_WAKE_TIME);
-    }
-
-    // Actions
+    // Connection Flow Handlers
     // -------------------------------------------------------------
 
-    // Create and send device status report to agent
-    function sendReport() {
-        reportSent = true;
+    function reportingFlow(val) {
+        // Note: Task Promises should always resolve, since a rejected promise would 
+        // stop other tasks from completing
+        local tasks = [getLocation(), getEnvReadings(), getAccelReading(), getBattStatus()];
+        Promise.all(tasks).then(onReportingTasksComplete.bindenv(this), onTasksFail.bindenv(this));
+    }
 
-        local report = {
-            "secSinceBoot" : (hardware.millis() - bootTime) / 1000.0,
-            "ts"           : time(),
-            "movement"     : persist.getMoveDetected()
-        }
-
-        if (battStatus != null) report.battStatus <- battStatus;
-        
-        if (thReading != null) {
-            report.temperature <- thReading.temperature;
-            report.humidity    <- thReading.humidity;
-        }
-        
-        if (accelReading != null) {
-            report.accel <- accelReading;
-        }
-
-        if (fix != null) {
-            report.fix <- fix;
+    function alertCheckFlow(shouldGetLocation) {
+        // Note: Task Promises should always resolve, since a rejected promise would 
+        // stop other tasks from completing
+        if (shouldGetLocation) {
+            local tasks = [getLocation(), getEnvReadings(), getAccelReading(), getBattStatus()];
+            Promise.all(tasks).then(onAlertCheckLocTasksComplete.bindenv(this), onTasksFail.bindenv(this));
         } else {
-            local mostAccFix = loc.gpsFix;
-            // If GPS got a fix of any sort
-            if (mostAccFix != null) {
-                // Log the fix summery
-                ::debug(format("[Main] fixType: %s, numSats: %s, accuracy: %s", mostAccFix.fixType.tostring(), mostAccFix.numSats.tostring(), mostAccFix.accuracy.tostring()));
-                // Add to report if fix was within the reporting accuracy
-                if (mostAccFix.accuracy <= LOCATION_REPORT_ACCURACY) report.fix <- mostAccFix;
-            } 
+            local tasks = [getEnvReadings(), getBattStatus()];
+            Promise.all(tasks).then(onAlertCheckTasksComplete.bindenv(this), onTasksFail.bindenv(this));
         }
-
-        // MOVEMENT DEBUGGING LOG
-        ::debug("[Main] Accel is enabled: " + move._isAccelEnabled() + ", accel int enabled: " + move._isAccelIntEnabled() + ", movement flag: " + persist.getMoveDetected());
-
-        // Send to agent
-        ::debug("[Main] Sending device status report to agent");
-        local mmHandlers = {
-            "onAck" : mmOnReportAck.bindenv(this),
-            "onFail" : mmOnReportFail.bindenv(this)
-        };
-        mm.send(MM_REPORT, report, mmHandlers);
     }
 
-    // Powers up GPS and starts location message filtering for accurate fix
-    function getLocation() {
-        PWR_GATE_EN.write(1);
-        if (loc == null) loc = Location(bootTime);
-        loc.getLocation(LOCATION_ACCURACY, onAccFix.bindenv(this));
+    function movementCheckFlow(impactAlert) {
+        // Get location and calculate distance to see if we have moved 
+        local tasks = [getLocation(), getEnvReadings(), getBattStatus()];
+        Promise.all(tasks)
+            .then(function(taskValues) {
+                // Collect reading values
+                local gpsFix        = taskValues[0];
+                local envReadings   = taskValues[1];
+                local batteryStatus = taskValues[2];
+                local accelReading  = (impactAlert != null) ? impactAlert.magnitude : null;
+
+                // Calculate if we have moved a significant distance
+                local distance = checkDistance(gpsFix);
+                // Store new alerts if needed
+                local alertsUpdated = checkAlerts(envReadings, batteryStatus, impactAlrtUpdated);
+
+                if (distance != null || alertsUpdated) {
+                    // Send report
+                    local report = createReport(persist.getAlerts(), envReadings, batteryStatus, accelReading, gpsFix, distnace);
+                    sendReport(report);
+                } else {
+                    powerDown();
+                }
+            }.bindenv(this), onTasksFail.bindenv(this))
     }
 
-    // Initializes Battery monitor and gets battery status
-    function getBattStatus() {
-        // NOTE: I2C is configured when Motion class is initailized in the
-        // constructor of this class, so we don't need to configure it here.
-        // Initialize Battery Monitor without configuring i2c
-        local battery = Battery(false);
-        battery.getStatus(onBatteryStatus.bindenv(this));
-    }
-
-    // Initializes Env Monitor and gets temperature and humidity
-    function getSensorReadings() {
-        // Get temperature and humidity reading
-        // NOTE: I2C is configured when Motion class is initailized in the 
-        // constructor of this class, so we don't need to configure it here.
-        // Initialize Environmental Monitor without configuring i2c
-        local env = Env();
-        env.getTempHumid(onTempHumid.bindenv(this));
-    }
-
-    function getAccelReading() {
-        move.getAccelReading(onAccel.bindenv(this));
-    }
-
-    // Updates report time
-    function updateReportingTime() {
-        local now = time();
-
-	    // If report timer expired set based on current time offset with by the boot ts
-        local reportTime = now + REPORT_TIME_SEC - (bootTime / 1000);
-
-        // Update report time if it has changed
-        persist.setReportTime(reportTime);
-
-        ::debug("[Main] Next report time " + reportTime + ", in " + (reportTime - now) + "s");
-    }
-
-    function setLocTimeout() {
-        // Ensure only one timer is set
-        cancelLocTimeout();
-        // Start a timer to send report if no GPS fix is found
-        gpsFixTimer = imp.wakeup(LOCATION_TIMEOUT_SEC, onGpsFixTimerExpired.bindenv(this));
-    }
-
-    function cancelLocTimeout() {
-        if (gpsFixTimer != null) {
-            imp.cancelwakeup(gpsFixTimer);
-            gpsFixTimer = null;
-        }
+    function onTasksFail(reason) {
+        ::error("[Main] Promise rejected reason: " + reason);
+        powerDown();
     }
 
     // Async Action Handlers
     // -------------------------------------------------------------
 
-    // Pin state change callback & on wake pin action
-    // If event valid, disables movement interrupt and store movement flag
-    function onMovement() {
-        // Check if new movement occurred
-        // Note: Motion detected method will clear interrupt when called
-        if (move.detected()) {
-            ::debug("[Main] Movement event detected");
+    function onMovePinStateChange() {
+        if (ACCEL_INT.read == 0) return;
 
-            // Check distance 
-            checkDistance = true;
-            // Set timer to send report if GPS doesn't get a fix, and we are connected
-            setLocTimeout();
-            getLocation();
+        // Get impact accel reading immediately
+        // NOTE: This is blocking on purpose to try to catch shock value
+        local impactAlert = move.checkImpact(IMPACT_THRESHOLD);
+        
+        // Prevent multiple location checks from processing
+        local alreadyProcessingMovement = setMovementTimeout();
 
-            // TODO: track if location check fails 
+        // Process for impact 
+        local alerts = persist.getAlerts();
+        local impactAlrtUpdated = AlertManager.checkImpactAlert(alerts, impactAlert);
+        // Update alerts with shock event if needed
+        if (impactAlrtUpdated) persist.storeAlerts(alerts);
+
+        // Checks for movement, this releases int pin if it is latched.
+        local moved = move.detected();
+        // Set movement flag if needed (use to indicate that we should check location??)
+        if (moved) persist.setMoveDetected(true);
+
+        // If we are already processing a location check or if no movement or impact
+        // detected then don't do anything more
+        if (alreadyProcessingMovement || (!moved && !impactAlrtUpdated)) return;
+
+        // NOTE: If we are currently getting a location but have not yet received a fix the persisted
+        // movement flag will trigger a distance calculation before report is sent. If report is already 
+        // in flight then stored alerts will be caught at next check-in
+
+        // Not currently checking for a location
+        if (haveAccFix == null) {
+            // Reset wake time to allow for getting location
+            cancelMaxWakeTimeout();
+            setMaxWakeTimeout();
+
+            // Trigger get location/check distance and schedule report if needed
+            movementCheckFlow(impactAlert);
+        } 
+    }
+
+    function onReportingTasksComplete(taskValues) {
+        // Collect reading values
+        local gpsFix        = taskValues[0];
+        local envReadings   = taskValues[1];
+        local accelReading  = taskValues[2];
+        local batteryStatus = taskValues[3];
+        local distance      = null; 
+
+        // Update alerts based on new readings
+        checkAlerts(envReadings, batteryStatus);
+
+        // Only calculate distance if we have moved
+        if (persist.getMoveDetected()) distance = checkDistance(gpsFix);
+
+        // Send report
+        local report = createReport(persist.getAlerts(), envReadings, batteryStatus, accelReading, gpsFix, distance);
+        sendReport(report);
+    }
+
+    function onAlertCheckLocTasksComplete(taskValues) {
+        // Collect reading values
+        local gpsFix        = taskValues[0];
+        local envReadings   = taskValues[1];
+        local accelReading  = taskValues[2];
+        local batteryStatus = taskValues[3];
+        local alertsUpdated = checkAlerts(envReadings, batteryStatus);
+        local distance      = null; 
+
+        // Only calculate distance if we have moved
+        if (persist.getMoveDetected()) distance = checkDistance(gpsFix);
+
+        if (alertsUpdated || distance != null) {
+            local report = createReport(persist.getAlerts(), envReadings, batteryStatus, accelReading, gpsFix, distance);
+            sendReport(report);
         } else {
-            // Sleep til next check-in time
-            // Note: To conserve battery power, after movement interrupt
-            // we are not connecting right away, we will report movement
-            // on the next scheduled check-in time
             powerDown();
         }
+    }
+
+    function onAlertCheckTasksComplete(taskValues) {
+        // Offline flow, check readings for alert conditions
+        local envReadings   = taskValues[0];
+        local batteryStatus = taskValues[1];
+        local alertsUpdated = checkAlerts(envReadings, batteryStatus);
+
+        if (alertsUpdated) {
+            local report = createReport(persist.getAlerts(), envReadings, batteryStatus);
+            sendReport(report);
+        } else {
+            powerDown();
+        }
+    }
+
+    // Stores fix data, and powers down the GPS
+    function onAccFix(gpxFix, resolve, reject) {
+        // We got a fix, cancel timer to send report automatically
+        cancelLocTimeout();
+
+        ::debug("[Main] Got accurate fix. Disabling GPS power");
+        PWR_GATE_EN.write(0);
+        
+        // Return fix via promise
+        return resolve(gpxFix);
     }
 
     // Assist messages written to u-blox completed
@@ -501,117 +582,255 @@ class MainController {
         }
     }
 
-    // If report timer expires before accurate GPS fix is not found,
-    // disable GPS power and send report if connected
-    function onGpsFixTimerExpired() {
-        ::debug("[Main] GPS failed to get an accurate fix. Disabling GPS power.");
-        PWR_GATE_EN.write(0);
+    // Actions That Return Promises
+    // -------------------------------------------------------------
 
-         // Send report if connection handler has already run
-        // and report has not been sent
-        if (lpm.isConnected()) sendReport();
-    }
+    // Helper to kick off connection asap
+    // Returns promise with flag (should send report), base on current 
+    // connection status/report time/imp doesn't have a valid timestamp
+    function shouldReport() {
+        return Promise(function(resolve, reject) {
+            // Resolve - Should connect/send report
+            // Reject  - No connection/report needed, pass boolean if we should get location
 
-    // Stores fix data, and powers down the GPS
-    function onAccFix(gpxFix) {
-        // We got a fix, cancel timer to send report automatically
-        cancelLocTimeout();
+            // If we are connected, then resolve immediately with flag to send report
+            if (cm.isConnected()) return resolve();
 
-        ::debug("[Main] Got accurate fix");
-        fix = gpxFix;
-
-        ::debug("[Main] Disabling GPS power");
-        PWR_GATE_EN.write(0);
-
-        if (checkDistance) {
-            ::debug("[Main] Movement triggered location. Check distance...");
-            // Woke on movement, check distance before reporting
-            if ("rawLat" in fix && "rawLon" in fix) {
-                local lastReportedLoc = persist.getLocation();
-
-                // No stored location - can't determine distance, so send report 
-                if (lastReportedLoc == null) {
-                    ::debug("[Main] No stored location. Scheduling report to update location...");
-                    reportMovement()
-                    return;
-                } 
-
-                ::debug("[Main] Verified lat and lon in location data. Filtering GPS data...");
-                local locHasChanged = loc.filterGPS(fix.rawLat, fix.rawLon, lastReportedLoc.lat, lastReportedLoc.lon, GPS_FILTER);
-                if (locHasChanged) {
-                    ::debug("[Main] Location greater than filter. Calculating distance...");
-                    ::debug("[Main] Current location: lat " + fix.rawLat + ", lon " + fix.rawLon);
-                    ::debug("[Main] Last reported location: lat " + lastReportedLoc.lat + ", lon " + lastReportedLoc.lon);
-
-                    // Param order: new lat, new lon, old lat old lon
-                    local dist = loc.calculateDistance(fix.rawLat, fix.rawLon, lastReportedLoc.lat, lastReportedLoc.lon);
-                
-                    // Report if we have moved more than the minimum distance since our last report
-                    if (dist >= DISTANCE_THRESHOLD_M) {
-                        ::debug("[Main] Distance above threshold. Scheduling report...");
-                        reportMovement();
-                        return;
-                    }
-                }
-                ::debug("[Main] Location did not change significantly.");
-            } else {
-                // Woke on movement, can't check distance
-                ::debug("[Main] GPS data did not have lat & lon, so can't calculate distance");
+            // We should report if any of the following conditions exists
+            if (persist.getReportTime() <= time() || !validTimestamp() || persist.getLocation() == null ||
+                AlertManager.haveUnreportedAlerts(persist.getAlerts())) {
+                    // We have a conditions that should trigger a report, connect and 
+                    // return shouldConnect true 
+                    cm.connect();
+                    return resolve();
             }
 
-            // Sleep til next check-in time
-            // Note: To conserve battery power, after movement interrupt
-            // we are not connecting right away, we will report movement
-            // on the next scheduled check-in time
-            ::debug("[Main] Powering down.");
-            powerDown();
-        } else {
-            // Update last reported lat & lon for calculating distance
-            if ("rawLat" in fix && "rawLon" in fix) persist.setLocation(fix.rawLat, fix.rawLon);
+            // Return flag indicating if location should be checked
+            return reject(persist.getMoveDetected());
+        }.bindenv(this))
+    }
 
-            // Send report if connection handler has already run
-            // and report has not been sent
-            if (lpm.isConnected() && !reportSent) sendReport();
+    // Powers up GPS and starts location message filtering for accurate fix
+    function getLocation() {
+        PWR_GATE_EN.write(1);
+        haveAccFix = false;
+        if (loc == null) loc = Location(bootTime);
+
+        return Promise(function(resolve, reject) {
+            setLocTimeout(resolve, reject);
+
+            loc.getLocation(LOCATION_ACCURACY, function(gpsFix) {
+                haveAccFix = true;
+                onAccFix(gpsFix, resolve, reject);
+            }.bindenv(this));
+        }.bindenv(this))
+    }
+
+    // Initializes Env Monitor and gets temperature and humidity
+    function getEnvReadings() {
+        // Get temperature and humidity reading
+        // NOTE: I2C is configured when Motion class is initailized in the 
+        // constructor of this class, so we don't need to configure it here.
+        // Initialize Environmental Monitor without configuring i2c
+        local env = Env();
+        return Promise(function(resolve, reject) {
+            env.checkTempHumid(TEMP_THRESHOLD_LOW, TEMP_THRESHOLD_HIGH,
+                HUMID_THRESHOLD_HIGH, HUMID_THRESHOLD_LOW, function(reading) {
+                    if (reading != null) {
+                        ::debug("[Main] Get temperature and humidity complete:")
+                        ::debug(format("[Main] Current Humidity: %0.2f %s, Current Temperature: %0.2f °C", reading.humidity, "%", reading.temperature));
+                        
+                        // TODO: check (should create alert, should update alert, should clear alert)
+                        if (reading.tempAlert != ALERT_DESC.IN_RANGE)  ::debug("[Main] Temp reading not in range.");
+                        if (reading.humidAlert != ALERT_DESC.IN_RANGE) ::debug("[Main] Humid reading not in range.");
+                    }
+
+                    return resolve(reading);
+                }.bindenv(this));
+        }.bindenv(this))
+    }
+
+    function getAccelReading() {
+        return Promise(function(resolve, reject) {
+            move.getAccelReading(function(reading) {
+                ::debug("[Main] Get accelerometer reading complete:");
+                if (reading != null) {
+                    local x = reading.x;
+                    local y = reading.y;
+                    local z = reading.z;
+                    ::debug(format("[Main] Acceleration (G): x = %0.4f, y = %0.4f, z = %0.4f", x, y, z));
+                    local sr = math.sqrt((x * x) + (y * y) + (z * z));
+                    return resolve(sr);
+                } else {
+                    return resolve(null);
+                }
+            }.bindenv(this));
+        }.bindenv(this))
+    }
+
+    // Initializes Battery monitor and gets battery status
+    function getBattStatus() {
+        // NOTE: I2C is configured when Motion class is initailized in the
+        // constructor of this class, so we don't need to configure it here.
+        // Initialize Battery Monitor without configuring i2c
+        local battery = Battery(false);
+        return Promise(function(resolve, reject) {
+            battery.checkStatus(BATTERY_THRESH_LOW, function(status) {
+                ::debug("[Main] Get battery status complete:")
+                ::debug("[Main] Remaining cell capacity: " + status.capacity + "mAh");
+                ::debug("[Main] Percent of battery remaining: " + status.percent + "%");
+                return resolve(status);
+            }.bindenv(this));
+        }.bindenv(this))
+    }
+
+    // Actions 
+    // -------------------------------------------------------------
+
+    function clearAlerts() {
+        local updated = AlertManager.clearReported(persist.getAlerts());
+        persist.storeAlerts(updated);
+    }
+
+    function checkAlerts(envReadings, batteryStatus, storeAlerts = false) {
+        local alerts = persist.getAlerts();
+
+        // Make sure to check/update all alert types base on new readings
+        // TEMP_LOW, TEMP_HIGH, HUMID_LOW, HUMID_HIGH, BATTERY_LOW, SHOCK
+        local envAlertsUpdated  = AlertManager.checkEnvAlert(alerts, envReadings);
+        local battAlertsUpdated = AlertManager.checkBattAlert(alerts, batteryStatus);
+
+        if (storeAlerts || envAlertsUpdated || battAlertsUpdated) {
+            // Stored alerts have been updated, re-store 
+            persist.storeAlerts(alerts);
+            // Return true to trigger report send
+            return true;
         }
 
+        return false;
     }
 
-    // Stores battery status for use in report
-    function onBatteryStatus(status) {
-        ::debug("[Main] Get battery status complete:")
-        ::debug("[Main] Remaining cell capacity: " + status.capacity + "mAh");
-        ::debug("[Main] Percent of battery remaining: " + status.percent + "%");
-        battStatus = status;
+    function checkDistance(fix) {
+        ::debug("[Main] Movement triggered location. Check distance...");
+
+        // Woke on movement, check distance before reporting
+        if ("rawLat" in fix && "rawLon" in fix) {
+            local lastReportedLoc = persist.getLocation();
+
+            // No stored location - can't determine distance, so send report 
+            if (lastReportedLoc == null) {
+                ::debug("[Main] No stored location. Scheduling report to update location...");
+                return null;
+            } 
+
+            ::debug("[Main] Verified lat and lon in location data. Filtering GPS data...");
+            local locHasChanged = loc.filterGPS(fix.rawLat, fix.rawLon, lastReportedLoc.lat, lastReportedLoc.lon, GPS_FILTER);
+            if (locHasChanged) {
+                ::debug("[Main] Location greater than filter. Calculating distance...");
+                ::debug("[Main] Current location: lat " + fix.rawLat + ", lon " + fix.rawLon);
+                ::debug("[Main] Last reported location: lat " + lastReportedLoc.lat + ", lon " + lastReportedLoc.lon);
+
+                // Param order: new lat, new lon, old lat old lon
+                local dist = loc.calculateDistance(fix.rawLat, fix.rawLon, lastReportedLoc.lat, lastReportedLoc.lon);
+            
+                // Report if we have moved more than the minimum distance since our last report
+                if (dist >= DISTANCE_THRESHOLD_M) {
+                    ::debug("[Main] Distance above threshold. Scheduling report...");
+                    return dist;
+                }
+            }
+            ::debug("[Main] Location did not change significantly.");
+        } else {
+            // Woke on movement, can't check distance
+            ::debug("[Main] GPS data did not have lat & lon, so can't calculate distance");
+        }
+
+        return null;
     }
 
-    // Stores temperature and humidity reading for use in report
-    function onTempHumid(reading) {
-        ::debug("[Main] Get temperature and humidity complete:")
-        ::debug(format("[Main] Current Humidity: %0.2f %s, Current Temperature: %0.2f °C", reading.humidity, "%", reading.temperature));
-        thReading = reading;
+    function createReport(alerts, envReadings, battStatus, accelReading = null, gpsFix = null, distance = null) {
+        local report = {
+            "secSinceBoot" : (hardware.millis() - bootTime) / 1000.0,
+            "ts"           : time(),
+            "movement"     : persist.getMoveDetected()
+        }
+
+        if (battStatus != null)   report.battStatus <- battStatus;
+        if (accelReading != null) report.magnitude  <- accelReading;
+        if (distance != null)     report.distance   <- distance;
+        if (alerts != null)       report.alerts     <- alerts;
+
+        if (envReadings != null) {
+            report.temperature <- envReadings.temperature;
+            report.humidity    <- envReadings.humidity;
+        }
+
+        if (gpsFix != null) {
+            report.fix <- gpsFix;
+        } else {
+            local mostAccFix = loc.gpsFix;
+            // If GPS got a fix of any sort
+            if (mostAccFix != null) {
+                // Log the fix summery
+                ::debug(format("[Main] fixType: %s, numSats: %s, accuracy: %s", mostAccFix.fixType.tostring(), mostAccFix.numSats.tostring(), mostAccFix.accuracy.tostring()));
+                // Add to report if fix was within the reporting accuracy
+                if (mostAccFix.accuracy <= LOCATION_REPORT_ACCURACY) report.fix <- mostAccFix;
+            } 
+        }
+
+        return report;
     }
 
-    function onAccel(reading) {
-        ::debug("[Main] Get accelerometer reading complete:");
-        local x = reading.x;
-        local y = reading.y;
-        local z = reading.z;
-        ::debug(format("[Main] Acceleration (G): %0.2f, %0.2f, %0.2f", x, y, z));
-        accelReading = math.sqrt((x * x) + (y * y) + (z * z));
+    // Send device status report to agent
+    function sendReport(report) {
+        if (!cm.isConnected()) {
+            // Schedule a report send on next connect
+            cm.onNextConnect(function() {
+                _sendReport(report);
+            });
+            // NOTE: Calling connect if we are already connecting is ok, since  
+            // ConnectionManager library manages this condition
+            // Try to connect
+            cm.connect();
+        } else {
+            _sendReport(report);
+        }
+    }
+
+    function _sendReport(report) {
+        // MOVEMENT DEBUGGING LOG
+        ::debug("[Main] Accel is enabled: " + move._isAccelEnabled() + ", accel int enabled: " + move._isAccelIntEnabled() + ", movement flag: " + persist.getMoveDetected());
+
+        // Send to agent
+        ::debug("[Main] Sending device status report to agent");
+        msgr.send(MM_REPORT, report);
     }
 
     // Sleep Management
     // -------------------------------------------------------------
 
+    // Updates report time
+    function updateReportingTime() {
+        local now = time();
+
+	    // If report timer expired set based on current time offset with by the boot ts
+        local reportTime = now + REPORT_TIME_SEC - (bootTime / 1000);
+
+        // Update report time if it has changed
+        persist.setReportTime(reportTime);
+
+        ::debug("[Main] Next report time " + reportTime + ", in " + (reportTime - now) + "s");
+    }
+
     // Updates check-in time if needed, and returns time in sec to sleep for
-    function getSleepTimer() {
+    function getSleepTimer(adjForTimeAwake = false) {
         local now = time();
         // Get stored wake time
         local wakeTime = persist.getWakeTime();
 
         // Our timer has expired, update it to next interval
         if (wakeTime == null || now >= wakeTime) {
-            wakeTime = now + CHECK_IN_TIME_SEC - (bootTime / 1000);
+            wakeTime = (adjForTimeAwake) ? (now + CHECK_IN_TIME - (bootTime / 1000)) : (now + CHECK_IN_TIME);
             persist.setWakeTime(wakeTime);
         }
 
@@ -620,55 +839,76 @@ class MainController {
         return sleepTime;
     }
 
-    function reportMovement() {
-        // Store movement flag
-        persist.setMoveDetected(true);
-        // Connect/Run connection flow
-        // Connection handler will trigger report send
-        lpm.connect();
-        // Get sensor readings for report
-        getSensorReadings();
-        // Get battery status
-        getBattStatus();
-    }
-
-    // Runs a check and triggers sleep flow
-    function checkAndSleep() {
-        if (shouldConnect() || lpm.isConnected()) {
-            if (!lpm.isConnected()) ::debug("[Main] Connecting...");
-            // Set timer to send report if GPS doesn't get a fix, and we are connected
-            setLocTimeout();
-            // Connect/Run connection flow
-            lpm.connect();
-            // Power up GPS and try to get a location fix
-            getLocation();
-            // Get sensor readings for report
-            getSensorReadings();
-            // Get battery status
-            getBattStatus();
-            // Get accelerometer reading for report
-            getAccelReading();
-        } else {
-            // Go to sleep
-            powerDown();
-        }
-    }
-
     // Debug logs about how long divice was awake, and puts device to sleep
     function powerDown() {
+        // Cancel max wake timer if it is still running
+        cancelMaxWakeTimeout();
+
+        if (gettingOfflineAssist) {
+            // Postpone for the ammount of time a message should ack in, 
+            // then go to sleep
+            imp.wakeup(MSG_ACK_TIMEOUT, sleep.bindenv(this))
+        }
+
+        sleep();
+    }
+
+    function sleep() {
         // Log how long we have been awake
         local now = hardware.millis();
         ::debug("[Main] Time since code started: " + (now - bootTime) + "ms");
         ::debug("[Main] Going to sleep...");
 
-        local sleepTime;
-        if (sleep == null) {
-            sleepTime = getSleepTimer();
-            ::debug("[Main] Setting sleep timer: " + sleepTime + "s");
-        }
+        lpm.sleepFor( getSleepTimer());
+    }
 
-        // Put device to sleep 
-        (sleep != null) ? sleep() : lpm.sleepFor(sleepTime);
+    // Timer Helpers
+    // -------------------------------------------------------------
+
+    function setLocTimeout(resolve, reject) {
+        // Ensure only one timer is set
+        cancelLocTimeout();
+        // Start a timer to send report if no GPS fix is found
+        gpsFixTimer = imp.wakeup(LOCATION_TIMEOUT_SEC, function() {
+            ::debug("[Main] GPS failed to get an accurate fix. Disabling GPS power.");
+            PWR_GATE_EN.write(0);
+
+            // Pass null to indicate we did not get an accurate fix
+            return resolve(null);
+        }.bindenv(this));
+    }
+
+    function cancelLocTimeout() {
+        if (gpsFixTimer != null) {
+            imp.cancelwakeup(gpsFixTimer);
+            gpsFixTimer = null;
+        }
+    }
+
+    function setMaxWakeTimeout() {
+        // Ensure only one timer is set
+        cancelMaxWakeTimeout();
+        // Start a timer to power down after we have been awake for set time
+        maxWakeTimer = imp.wakeup(MAX_WAKE_TIME, powerDown.bindenv(this));
+    }
+
+    function cancelMaxWakeTimeout() {
+        if (maxWakeTimer != null) {
+            imp.cancelwakeup(maxWakeTimer);
+            maxWakeTimer = null;
+        }
+    }
+
+    function setMovementTimeout() {
+        if (!movementTimeout) {
+            movementTimeout = true;
+            // Only process one movement event per wake cycle
+            imp.wakeup(MAX_WAKE_TIME, function() {
+                movementTimeout = false;
+            }.bindenv(this)) 
+            return false;
+        }
+        return true;
     }
 
     // Helpers
@@ -684,30 +924,6 @@ class MainController {
         local now = time();
         persist.setWakeTime(now);
         persist.setReportTime(now);
-    }
-
-    // Returns boolean, checks for event(s) or if report time has passed
-    function shouldConnect() {
-        // Check for events
-        // Note: We are not currently storing position changes. The assumption
-        // is that if we change position then movement will be detected and trigger
-        // a report to be generated.
-        local haveMoved = persist.getMoveDetected();
-        ::debug("[Main] Movement detected: " + haveMoved);
-        if (haveMoved) return true;
-
-        // NOTE: We need a valid timestamp to determine sleep times.
-        // If the imp looses all power, a connection to the server is
-        // needed to get a valid timestamp.
-        local validTS = validTimestamp();
-        ::debug("[Main] Valid timestamp: " + validTS);
-        if (!validTS) return true;
-
-        // Check if report time has passed
-        local now = time();
-        local shouldReport = (now >= persist.getReportTime());
-        ::debug("[Main] Time to send report: " + shouldReport);
-        return shouldReport;
     }
 
     // Returns boolean, if the imp module currently has a valid timestamp

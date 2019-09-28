@@ -100,7 +100,12 @@ class Motion {
     function getAccelReading(cb) {
         if (_isAccelEnabled()) {
             local r = accel.getAccel();
-            if ("x" in r && "y" in r && "z" in r) cb(r);
+            if ("error" in r) {
+                ::error("[Motion] Error reading accel " + r.error);
+                cb(null);
+            } else {
+                cb(r);
+            }
         } else {
             // Enable accel
             accel.setDataRate(ACCEL_DATA_RATE);
@@ -109,15 +114,73 @@ class Motion {
             local odr = 1.0 / ACCEL_DATA_RATE;
             imp.wakeup(odr, function() {
                 local r = accel.getAccel();
-                if ("x" in r && "y" in r && "z" in r) cb(r);
                 // Disable accel
                 accel.setDataRate(0);
                 accel.enable(false);
+                if ("error" in r) {
+                    ::error("[Motion] Error reading accel " + r.error);
+                    cb(null);
+                } else {
+                    cb(r);
+                }
             }.bindenv(this));
         }
     }
 
-        // Helper returns bool if accel is enabled
+    // Note: This is blocking, use only when wake on interrupt to
+    // try and get impact measurement before doing anything else
+    function checkImpact(thresh) {
+        local shouldDisable = false;
+        if (!_isAccelEnabled()) {
+            // Enable accel
+            accel.setDataRate(ACCEL_DATA_RATE);
+            accel.enable(true);
+            shouldDisable = true;
+        }
+
+        local max        = 0;
+        local alert      = null;
+        local numSamples = 32;
+        local last = numSamples - 1;
+        for (local i = 0; i < numSamples; i++) {
+            local r = accel.getAccel();
+            if ("error" in r) continue;
+            local x = r.x;
+            local y = r.y;
+            local z = r.z;
+            local sr = math.sqrt(x*x + y*y + z*z);
+            if (sr > max) {
+                max   = sr;
+                alert = {
+                    "raw"       : r,
+                    "magnitude" : sr
+                }
+            }
+            if (i != last) {
+                imp.sleep(0.003);
+            } else if (alert == null) {
+                alert = {
+                    "raw"       : r,
+                    "magnitude" : sr
+                }
+            }
+        }
+
+        if (shouldDisable) {
+            // Disable accel
+            accel.setDataRate(0);
+            accel.enable(false);
+        }
+
+        if (alert != null) {
+            alert.impactDetected <- (max >= thresh); 
+            alert.ts             <- time();
+        }
+
+        return alert;
+    }
+
+    // Helper returns bool if accel is enabled
     function _isAccelEnabled() {
         // bits 0-2 xyz enabled, 3 low-power enabled, 4-7 data rate
         local val = accel._getReg(LIS3DH_CTRL_REG1);

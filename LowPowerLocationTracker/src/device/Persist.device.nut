@@ -27,10 +27,13 @@
 enum PERSIST_FILE_NAMES {
     WAKE_TIME              = "wake", 
     REPORT_TIME            = "report",
+    OFFLINE_ASSIST_CHECKED = "offAssistChecked",
     MOVE_DETECTED          = "move",
     LOCATION               = "loc",
-    OFFLINE_ASSIST_CHECKED = "offAssistChecked"
+    ALERTS                 = "alerts"
 }
+
+const ALERT_BLOB_SIZE = 14;
 
 // Manages Persistant Storage  
 // Dependencies: SPIFlashFileSystem Libraries
@@ -41,9 +44,10 @@ class Persist {
 
     reportTime           = null;
     wakeTime             = null;
+    offlineAssistChecked = null;
     moveDetected         = null;
     location             = null;
-    offlineAssistChecked = null;
+    alerts               = null;
 
     constructor() {
         // TODO: Update with more optimized circular buffer.
@@ -52,16 +56,24 @@ class Persist {
         _sffs.init();
     }
 
+    // For debug purposes
+    function _onInit(files) {
+        // Log how many files we found
+        ::debug(format("Found %d files", files.len()));
+
+        // Log all the information returned about each file:
+        foreach(file in files) {
+            ::debug(format("  %d: %s (%d bytes)", file.id, file.fname, file.size));
+        }
+    }
+
     function getWakeTime() {
         // If we have a local copy, return the local copy
         if (wakeTime != null) return wakeTime;
 
         // Try to get wake time from SPI, store a local copy
-        if (_sffs.fileExists(PERSIST_FILE_NAMES.WAKE_TIME)) {
-            local file = _sffs.open(PERSIST_FILE_NAMES.WAKE_TIME, "r");
-            local wt = file.read();
-            file.close();
-            wt.seek(0, 'b');
+        local wt = _readFile(PERSIST_FILE_NAMES.WAKE_TIME);
+        if (wt != null) {
             wakeTime = wt.readn('i');
         }
 
@@ -74,13 +86,8 @@ class Persist {
         if (reportTime != null) return reportTime;
 
         // Try to get report time from SPI, store a local copy
-        if (_sffs.fileExists(PERSIST_FILE_NAMES.REPORT_TIME)) {
-            local file = _sffs.open(PERSIST_FILE_NAMES.REPORT_TIME, "r");
-            local rt = file.read();
-            file.close();
-            rt.seek(0, 'b');
-            reportTime = rt.readn('i');
-        }
+        local rt = _readFile(PERSIST_FILE_NAMES.REPORT_TIME);
+        if (rt != null) reportTime = rt.readn('i');
         
         // Return report time or null if it is not found
         return reportTime;;
@@ -89,17 +96,14 @@ class Persist {
     function getMoveDetected() {
         // If we have a local copy, return the local copy
         if (moveDetected != null) return moveDetected;
-        
-        if (_sffs.fileExists(PERSIST_FILE_NAMES.MOVE_DETECTED)) {
-            local file = _sffs.open(PERSIST_FILE_NAMES.MOVE_DETECTED, "r");
-            local move = file.read();
-            file.close();
-            move.seek(0, 'b');
+
+        local moved = _readFile(PERSIST_FILE_NAMES.MOVE_DETECTED);
+        if (moved != null) {
             moveDetected = (move.readn('b') == 1);
         } else {
             // Movement is only stored when an event has happened. If no file 
             // has been stored, then no movement event has happened.
-            moveDetected = false;
+            moveDetected = false;            
         }
 
         return moveDetected;
@@ -109,64 +113,58 @@ class Persist {
         // If we have a local copy, return the local copy
         if (location != null) return location;
 
-        // Try to get report time from SPI, store a local copy
-        if (_sffs.fileExists(PERSIST_FILE_NAMES.LOCATION)) {
-            local file = _sffs.open(PERSIST_FILE_NAMES.LOCATION, "r");
-            local rt = file.read();
-            file.close();
-            rt.seek(0, 'b');
+        // Try to get last location from SPI, store a local copy
+        local rawLoc = _readFile(PERSIST_FILE_NAMES.LOCATION);
+        if (rawLoc != null) {
             location = {};
             location.lat <- rt.readn('i');
             location.lon <- rt.readn('i');
         }
-        
+
         // Return location or null if it is not found
-        return location;;
+        return location;
     }
 
-        // Use a date string to get assist messages for that day
+    // Use a date string to get assist messages for that day
     function getAssistByDate(fileName) {
-        if (!_sffs.fileExists(fileName)) return null;
-
-        // Open, get all assist messages for that file name (date)
-        local file = _sffs.open(fileName, "r");
-        local msgs = file.read();
-        file.close();
-
-        return msgs;
+        // Return blob of msgs or null for all assist messages 
+        // for the specified file name (date)
+        return _readFile(fileName);
     }
 
     function getOfflineAssestChecked() {
         // If we have a local copy, return the local copy
         if (offlineAssistChecked != null) return offlineAssistChecked;
 
-         // Try to get report time from SPI, store a local copy
-        if (_sffs.fileExists(PERSIST_FILE_NAMES.OFFLINE_ASSIST_CHECKED)) {
-            local file = _sffs.open(PERSIST_FILE_NAMES.OFFLINE_ASSIST_CHECKED, "r");
-            local rt = file.read();
-            file.close();
-            rt.seek(0, 'b');
-            offlineAssistChecked = rt.readn('i');
-        }
-        
+        // Try to get offline assist checked time from SPI, store a local copy
+        local tm = _readFile(PERSIST_FILE_NAMES.OFFLINE_ASSIST_CHECKED);
+        if (tm != null) offlineAssistChecked = tm.readn('i');
+
         // Return offlineAssistChecked or null if it is not found
-        return offlineAssistChecked;;
+        return offlineAssistChecked;
+    }
+
+    function getAlerts() {
+        if (alerts != null) return alerts;
+
+        local rawAlerts = _readFile(PERSIST_FILE_NAMES.ALERTS);
+        if (rawAlerts != null) {
+            alerts = _deserializeAlerts(rawAlerts);
+        } else {
+            alerts = [];
+        }
+
+        return alerts
     }
 
     function setMoveDetected(detected) {
         // Only update if movement flag has changed
         if (moveDetected == detected) return;
 
-        // Erase outdated movement data
-        if (_sffs.fileExists(PERSIST_FILE_NAMES.MOVE_DETECTED)) {
-            _sffs.eraseFile(PERSIST_FILE_NAMES.MOVE_DETECTED)
-        }
-
-        // Update local and stored wake time with the new time
+        // Update local and stored movement flag
         moveDetected = detected;
-        local file = _sffs.open(PERSIST_FILE_NAMES.MOVE_DETECTED, "w");
-        file.write(_serializeMove(moveDetected));
-        file.close();
+        _writeFile(PERSIST_FILE_NAMES.MOVE_DETECTED, _serializeMove(moveDetected));
+        
         ::debug("[Persist] Movement flag stored: " + moveDetected);
     }
 
@@ -174,16 +172,10 @@ class Persist {
         // Only update if timestamp has changed
         if (wakeTime == newTime) return;
 
-        // Erase outdated wake time
-        if (_sffs.fileExists(PERSIST_FILE_NAMES.WAKE_TIME)) {
-            _sffs.eraseFile(PERSIST_FILE_NAMES.WAKE_TIME)
-        }
-
         // Update local and stored wake time with the new time
         wakeTime = newTime;
-        local file = _sffs.open(PERSIST_FILE_NAMES.WAKE_TIME, "w");
-        file.write(_serializeTimestamp(wakeTime));
-        file.close();
+        _writeFile(PERSIST_FILE_NAMES.WAKE_TIME, _serializeTimestamp(wakeTime));
+
         ::debug("[Persist] Wake time stored: " + wakeTime);
     }
 
@@ -191,16 +183,10 @@ class Persist {
         // Only update if timestamp has changed
         if (reportTime == newTime) return;
 
-        // Erase outdated report time
-        if (_sffs.fileExists(PERSIST_FILE_NAMES.REPORT_TIME)) {
-            _sffs.eraseFile(PERSIST_FILE_NAMES.REPORT_TIME)
-        }
-
         // Update local and stored report time with the new time
         reportTime = newTime;
-        local file = _sffs.open(PERSIST_FILE_NAMES.REPORT_TIME, "w");
-        file.write(_serializeTimestamp(reportTime));
-        file.close();
+        _writeFile(PERSIST_FILE_NAMES.REPORT_TIME, _serializeTimestamp(reportTime));
+
         ::debug("[Persist] Report time stored: " + reportTime);
     }
 
@@ -208,41 +194,27 @@ class Persist {
         // Only update if location has changed
         if (location != null && location.len() == 2 && lat == location.lat && lon == location.lon) return;
 
-        // Erase outdated report time
-        if (_sffs.fileExists(PERSIST_FILE_NAMES.LOCATION)) {
-            _sffs.eraseFile(PERSIST_FILE_NAMES.LOCATION)
-        }
-
-        // Update local and stored report time with the new time
+        // Update local and stored location
         location = {
             "lat" : lat,
             "lon" : lon
         };
+        _writeFile(PERSIST_FILE_NAMES.LOCATION, _serializeLocation(lat, lon));
        
-        local file = _sffs.open(PERSIST_FILE_NAMES.LOCATION, "w");
-        file.write(_serializeLocation(lat, lon));
-        file.close();
         ::debug("[Persist] Location stored lat: " + lat + ", lon: " + lon);
     }
 
     function setOfflineAssistChecked(newTime) {
         if (offlineAssistChecked == newTime) return;
 
-        // Erase outdated report time
-        if (_sffs.fileExists(PERSIST_FILE_NAMES.OFFLINE_ASSIST_CHECKED)) {
-            _sffs.eraseFile(PERSIST_FILE_NAMES.OFFLINE_ASSIST_CHECKED)
-        }
-
-        // Update local and stored report time with the new time
+        // Update local and stored offline assist checked time with the new time
         offlineAssistChecked = newTime;
-        
-        local file = _sffs.open(PERSIST_FILE_NAMES.OFFLINE_ASSIST_CHECKED, "w");
-        file.write(_serializeTimestamp(offlineAssistChecked));
-        file.close();
+        _writeFile(PERSIST_FILE_NAMES.OFFLINE_ASSIST_CHECKED, _serializeTimestamp(offlineAssistChecked));
+
         ::debug("[Persist] Offline assist refesh time stored: " + offlineAssistChecked);
     }
 
-        // Takes a table of assist messages, where table slots are date strings
+    // Takes a table of assist messages, where table slots are date strings
     // NOTE: these date strings will be used as file names
     function storeAssist(msgsByDate) {
         // TODO: May want to optimize erases to happen when it won't keep device awake
@@ -251,17 +223,54 @@ class Persist {
 
         // Store new messages
         foreach(day, msgs in msgsByDate) {
-            // TODO: erase all stale messages as well as today's
             // If day exists, delete it as new data will be fresher
-            if (_sffs.fileExists(day)) {
-                _sffs.eraseFile(day);
-            }
-
-            // Write day msgs
-            local file = _sffs.open(day, "w");
-            file.write(msgs);
-            file.close();
+            _writeFile(day, msgs);
         }
+    }
+
+    // Note: this will wipe out all stored alerts and replace with the alerts 
+    // passed in. Use helper sameAsStoredAlerts to see if alerts match, before 
+    // storing. 
+    function storeAlerts(newAlerts) {
+        if (newAlerts == null || newAlerts.len() == 0) {
+            alerts = null;
+            if (_sffs.fileExists(fname)) _sffs.eraseFile(fname);
+
+            ::debug("[Persist] No alerts stored");
+        } else {
+            alerts = newAlerts;
+            _writeFile(PERSIST_FILE_NAMES.ALERTS, _serializeAlerts(alerts));
+
+            ::debug("[Persist] New alerts stored. Number of alerts: " + alerts.len());
+        }
+    }
+
+    function sameAsStoredAlerts(newAlerts) {
+        local stored = _serializeAlerts(alerts);
+        local new = _serializeAlerts(newAlerts);
+        return crypto.equals(stored, new);
+    }
+
+    function _readFile(fname) {
+        local rawFile = null;
+        if (_sffs.fileExists(fname)) {
+            local file = _sffs.open(fname, "r");
+            rawFile = file.read();
+            file.close();
+            rawFile.seek(0, 'b');
+        }
+        return rawFile;
+    }
+
+    function _writeFile(fname, data) {
+        // Erase outdated data
+        if (_sffs.fileExists(fname)) {
+            _sffs.eraseFile(fname);
+        }
+
+        local file = _sffs.open(fname, "w");
+        file.write(data);
+        file.close();
     }
 
     function _serializeTimestamp(ts) {
@@ -340,6 +349,49 @@ class Persist {
             // Don't erase file
             return true;
         }
+    }
+
+    function _serializeAlerts(alrts) {
+        local numAlerts = alrts.len();
+        if (numAlerts == 0) return;
+
+        local b = blob(numAlerts * ALERT_BLOB_SIZE);
+        foreach(alert in alrts) {
+            b.writeblob(_serializeAlert(alert));
+        }
+
+        return b;
+    }
+
+    function _deserializeAlerts(rawAlerts) {
+        rawAlerts.seek(0, 'b');
+        local alrts = [];
+
+        for (local i = 0; i < rawAlerts.len(); i += ALERT_BLOB_SIZE) {
+            local alert = {};
+            alert.type     <- rawAlerts.readn('b');
+            alert.trigger  <- rawAlerts.readn('f');
+            alert.created  <- rawAlerts.readn('i');
+            alert.resolved <- rawAlerts.readn('i');
+            alert.reported <- (rawAlerts.readn('b') == 1);  
+            alrts.push(alert);
+        }
+        
+        return alrts;
+    }
+
+    function _serializeAlert(alert) {
+        local b = blob(ALERT_BLOB_SIZE);
+        local reported = (alert.reported) ? 1 : 0;
+
+        b.writen(alert.type, 'b');      // 8 bit int (0-5)
+        b.writen(alert.trigger, 'f');   // 32 bit float (reading value)
+        b.writen(alert.created, 'i');   // 32 bin int (timestamp)
+        b.writen(alert.resolved, 'i');  // 32 bin int (timestamp)
+        b.writen(reported, 'b');        // 8 bit int (0-1)
+        b.seek(0, 'b');
+
+        return b;
     }
 
 }

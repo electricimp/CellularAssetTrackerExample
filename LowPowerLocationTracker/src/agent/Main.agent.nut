@@ -58,8 +58,8 @@ class MainController {
         mm = MessageManager();
 
         // Open listeners for messages from device
-        mm.on(MM_REPORT, processReport.bindenv(this));
-        mm.on(MM_ASSIST, getAssist.bindenv(this));
+        mm.on(MSG_REPORT, processReport.bindenv(this));
+        mm.on(MSG_ASSIST, getAssist.bindenv(this));
 
         // Initialize Cloud Service
         // NOTE: Cloud service class is empty and will initialize an empty framework 
@@ -73,10 +73,6 @@ class MainController {
         ::debug("[Main] Recieved status update from device: ");
         ::debug("--------------------------------------------------------------");
         ::debug(http.jsonencode(report));
-
-        if ("battStatus" in report && report.battStatus.percent <= 10) {
-            ::log("[Main] LOW BATTERY WARNING: " + report.battStatus.percent + " REMAINING.");
-        }
 
         if ("fix" in report) {
             local fix = report.fix;

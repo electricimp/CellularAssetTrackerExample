@@ -87,4 +87,13 @@ class Battery {
             }.bindenv(this))
         }
     }
+
+    function checkStatus(thresh, cb) {
+        getStatus(function(soc) {
+            local status = soc;
+            status.battAlert <- (soc.percent <= thresh) ? ALERT_DESC.LOW : ALERT_DESC.IN_RANGE;
+            status.ts        <- time();
+            cb(status);
+        }.bindenv(this))
+    }
 }
