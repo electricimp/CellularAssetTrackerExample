@@ -171,15 +171,15 @@ class Location {
 
     function _onNavMsg(payload) {
         // This will trigger on every msg, so don't log message unless you need to debug something
-        // ::debug("In NAV_PVT msg handler...");
+        // ::debug("[Location] In NAV_PVT msg handler...");
         // ::debug("-----------------------------------------");
-        // ::debug("Msg len: " + payload.len());
+        // ::debug("[Location] Msg len: " + payload.len());
 
         local parsed = UbxMsgParser[UBX_MSG_PARSER_CLASS_MSG_ID.NAV_PVT](payload);
         if (parsed.error == null) {
             _checkFix(parsed);
         } else {
-            ::error(parsed.error);
+            ::error("[Location] " + parsed.error);
             ::debug(paylaod);
         }
 

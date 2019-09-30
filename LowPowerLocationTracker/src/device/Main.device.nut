@@ -376,6 +376,11 @@ class MainController {
 
         // Get reading immediately
         // NOTE: This is blocking on purpose to try to catch shock value
+        // This method should only be used for demo purposes, a real shock 
+        // measurement requires a 2nd accelerometer with interrupt configured
+        // for shock events
+        // TODO: while awake update b/c of movement, update interrupt to shock
+        //  detection, then reconfiguere before powering down
         local impactAlert = move.checkImpact(IMPACT_THRESHOLD);
 
         // Set a limit on how long we are awake for, sets a timer that triggers 
@@ -468,8 +473,13 @@ class MainController {
     function onMovePinStateChange() {
         if (ACCEL_INT.read == 0) return;
 
-        // Get impact accel reading immediately
+        // Get reading immediately
         // NOTE: This is blocking on purpose to try to catch shock value
+        // This method should only be used for demo purposes, a real shock 
+        // measurement requires a 2nd accelerometer with interrupt configured
+        // for shock events
+        // TODO: while awake update b/c of movement, update interrupt to shock
+        //  detection, then reconfiguere before powering down
         local impactAlert = move.checkImpact(IMPACT_THRESHOLD);
         
         // Prevent multiple location checks from processing

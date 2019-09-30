@@ -55,19 +55,19 @@ AlertManager <- {
         // Each impact is a new alert, so just add it to 
         // the alerts array
         if (new != null && new.impactDetected) {
-            local alert = {
-                "type"     : ALERT_TYPE.SHOCK,
-                "trigger"  : new.magnitude,
-                "created"  : new.ts,
-                "resolved" : new.ts,
-                "reported" : false
-            }
+            local alert =  _createAlertTable(
+                ALERT_TYPE.SHOCK,
+                new.magnitude,
+                new.ts,
+                new.ts,
+                false
+            )
             stored.push(alert);
             return true;
         }
 
         return false;
-    }
+    },
 
     "checkEnvAlert" : function(stored, new) {
         if (new == null) return false;
@@ -85,13 +85,13 @@ AlertManager <- {
         // New battery alert condition, ceate alert
         if (last == null && battAlert == ALERT_DESC.LOW) {
             // Create new alert
-            local alert = {
-                "type"     : ALERT_TYPE.BATTERY_LOW,
-                "trigger"  : new.percent,
-                "created"  : new.ts,
-                "resolved" : 0,
-                "reported" : false
-            }
+            local alert =  _createAlertTable(
+                ALERT_TYPE.BATTERY_LOW,
+                new.percent,
+                new.ts,
+                0,
+                false
+            )
             // Add to stored alerts
             stored.push(alert);
             // Return (changes made) true
@@ -101,13 +101,13 @@ AlertManager <- {
         // Alert condition resolved, update alert
         if (last != null && battAlert == ALERT_DESC.IN_RANGE) {
             // Update resolved and reported values
-            local alert = {
-                "type"     : last.type,
-                "trigger"  : last.trigger,
-                "created"  : last.created,
-                "resolved" : new.ts,
-                "reported" : false
-            }
+            local alert =  _createAlertTable(
+                last.type,
+                last.trigger,
+                last.created,
+                new.ts,
+                false
+            )
             stored[last.idx] = alert;
             // Return (changes made) true
             return true;
@@ -183,13 +183,13 @@ AlertManager <- {
         // No temp alerts stored, but we have a new temp alert
         if (tempAlertDesc != ALERT_DESC.IN_RANGE && lastTempAlert == null) {
             // Create new alert
-            local alert = {
-                "type"     : (tempAlertDesc == ALERT_DESC.HIGH) ? ALERT_TYPE.TEMP_HIGH : ALERT_TYPE.TEMP_LOW,
-                "trigger"  : new.temperature,
-                "created"  : new.ts,
-                "resolved" : 0,
-                "reported" : false
-            }
+            local alert =  _createAlertTable(
+                (tempAlertDesc == ALERT_DESC.HIGH) ? ALERT_TYPE.TEMP_HIGH : ALERT_TYPE.TEMP_LOW,
+                new.temperature,
+                new.ts,
+                0,
+                false
+            )
             // Add to stored alerts
             stored.push(alert);
             // Return (changes made) true
@@ -199,13 +199,13 @@ AlertManager <- {
         // Temp alert condtion cleared, update temp alert
         if (tempAlertDesc == ALERT_DESC.IN_RANGE && lastTempAlert != null) {
             // Update resolved and reported values
-            local alert = {
-                "type"     : lastTempAlert.type,
-                "trigger"  : lastTempAlert.trigger,
-                "created"  : lastTempAlert.created,
-                "resolved" : new.ts,
-                "reported" : false
-            }
+            local alert =  _createAlertTable(
+                lastTempAlert.type,
+                lastTempAlert.trigger,
+                lastTempAlert.created,
+                new.ts,
+                false
+            )
             stored[lastTempAlert.idx] = alert;
             // Return (changes made) true
             return true;
@@ -217,24 +217,24 @@ AlertManager <- {
                 (lastTempAlert.type == TEMP_LOW && tempAlertDesc != ALERT_DESC.LOW)) {
                     // Resolve stored alert if needed
                     if (lastTempAlert.resolved == 0) {
-                        local updated = {
-                            "type"     : lastTempAlert.type,
-                            "trigger"  : lastTempAlert.trigger,
-                            "created"  : lastTempAlert.created,
-                            "resolved" : new.ts,
-                            "reported" : false
-                        }
+                        local updated =  _createAlertTable(
+                            astTempAlert.type,
+                            lastTempAlert.trigger,
+                            lastTempAlert.created,
+                            new.ts,
+                            false
+                        )
                         stored[lastTempAlert.idx] = updated;
                     }
                     
                     // Create new alert
-                    local alert = {
-                        "type"     : (tempAlertDesc == ALERT_DESC.HIGH) ? ALERT_TYPE.TEMP_HIGH : ALERT_TYPE.TEMP_LOW,
-                        "trigger"  : new.temperature,
-                        "created"  : new.ts,
-                        "resolved" : 0,
-                        "reported" : false
-                    };
+                    local alert =  _createAlertTable(
+                        (tempAlertDesc == ALERT_DESC.HIGH) ? ALERT_TYPE.TEMP_HIGH : ALERT_TYPE.TEMP_LOW,
+                        new.temperature,
+                        new.ts,
+                        0,
+                        false
+                    );
                     // Add to stored alerts
                     stored.push(alert);
                     // Return (changes made) true
@@ -253,13 +253,13 @@ AlertManager <- {
         // No temp alerts stored, but we have a new temp alert
         if (humidAlertDesc != ALERT_DESC.IN_RANGE && lastHumidAlert == null) {
             // Create new alert
-            local alert = {
-                "type"     : (humidAlertDesc == ALERT_DESC.HIGH) ? ALERT_TYPE.HUMID_HIGH : ALERT_TYPE.HUMID_LOW,
-                "trigger"  : new.humidity,
-                "created"  : new.ts,
-                "resolved" : 0,
-                "reported" : false
-            }
+            local alert = _createAlertTable(
+                (humidAlertDesc == ALERT_DESC.HIGH) ? ALERT_TYPE.HUMID_HIGH : ALERT_TYPE.HUMID_LOW,
+                new.humidity,
+                new.ts,
+                0,
+                false
+            )
             // Add to stored alerts
             stored.push(alert);
             // Return (changes made) true
@@ -269,13 +269,13 @@ AlertManager <- {
         // Temp alert condtion cleared, update temp alert
         if (humidAlertDesc == ALERT_DESC.IN_RANGE && lastHumidAlert != null) {
             // Update resolved and reported values
-            local alert = {
-                "type"     : lastHumidAlert.type,
-                "trigger"  : lastHumidAlert.trigger,
-                "created"  : lastHumidAlert.created,
-                "resolved" : new.ts,
-                "reported" : false
-            }
+            local alert = _createAlertTable(
+                lastHumidAlert.type,
+                lastHumidAlert.trigger,
+                lastHumidAlert.created,
+                new.ts,
+                false
+            )
             stored[lastHumidAlert.idx] = alert;
             // Return (changes made) true
             return true;
@@ -283,28 +283,28 @@ AlertManager <- {
 
         // New alert doesn't match our current alert
         if (lastHumidAlert != null && humidAlertDesc != ALERT_DESC.IN_RANGE) {
-            if ((lastHumidAlert.type == TEMP_HIGH && humidAlertDesc != ALERT_DESC.HIGH) ||
-                (lastHumidAlert.type == TEMP_LOW && humidAlertDesc != ALERT_DESC.LOW)) {
+            if ((lastHumidAlert.type == HUMID_HIGH && humidAlertDesc != ALERT_DESC.HIGH) ||
+                (lastHumidAlert.type == HUMID_LOW && humidAlertDesc != ALERT_DESC.LOW)) {
                     // Resolve stored alert if needed
                     if (lastHumidAlert.resolved == 0) {
-                        local updated = {
-                            "type"     : lastHumidAlert.type,
-                            "trigger"  : lastHumidAlert.trigger,
-                            "created"  : lastHumidAlert.created,
-                            "resolved" : new.ts,
-                            "reported" : false
-                        }
+                        local updated = _createAlertTable(
+                            lastHumidAlert.type,
+                            lastHumidAlert.trigger,
+                            lastHumidAlert.created,
+                            new.ts,
+                            false
+                        )
                         stored[lastHumidAlert.idx] = updated;
                     }
                     
                     // Create new alert
-                    local alert = {
-                        "type"     : (humidAlertDesc == ALERT_DESC.HIGH) ? ALERT_TYPE.TEMP_HIGH : ALERT_TYPE.TEMP_LOW,
-                        "trigger"  : new.humidity,
-                        "created"  : new.ts,
-                        "resolved" : 0,
-                        "reported" : false
-                    }
+                    local alert = _createAlertTable(
+                        (humidAlertDesc == ALERT_DESC.HIGH) ? ALERT_TYPE.HUMID_HIGH : ALERT_TYPE.HUMID_LOW,
+                        new.humidity,
+                        new.ts,
+                        0,
+                        false
+                    )
                     // Add to stored alerts
                     stored.push(alert);
                     // Return (changes made) true
@@ -314,6 +314,18 @@ AlertManager <- {
 
         // No alerts updated
         return false;
+    }, 
+
+    "_createAlertTable" : function(type, trigger, created, resolved, reported) {
+        // NOTE: if the alert table changes, update Persist alert encoding
+        // and decoding methods
+        return {
+            "type"     : type,
+            "trigger"  : trigger,
+            "created"  : created,
+            "resolved" : resolved,
+            "reported" : reported
+        }
     }
 
 }

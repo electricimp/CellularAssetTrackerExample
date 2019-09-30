@@ -42,7 +42,7 @@ class Motion {
     }
 
     function enable(threshold, onInterrupt = null) {
-        ::debug("Enabling motion detection");
+        ::debug("[Motion] Enabling motion detection");
 
         configIntWake(onInterrupt);
         
@@ -70,7 +70,7 @@ class Motion {
 
     // This method does NOT clear the latched interrupt pin. It disables the accelerometer and reconfigures wake pin.  
     function disable() {
-        ::debug("Disabling motion detection");
+        ::debug("[Motion] Disabling motion detection");
 
         // Disables accelerometer 
         accel.setDataRate(0);
@@ -90,7 +90,7 @@ class Motion {
     // Returns boolean if interrupt was detected. 
     // Note: Calling this method clears the interrupt.
     function detected() {
-        ::debug("Checking and clearing interrupt");
+        ::debug("[Motion] Checking and clearing interrupt");
         // Get interrupt table. Note this clears the interrupt data 
         local res = accel.getInterruptTable();
         // Return boolean - if motion event has occurred
