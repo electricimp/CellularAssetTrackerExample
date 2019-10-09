@@ -282,6 +282,7 @@ class MainController {
 
         // Update last reported lat & lon for calculating distance
         if ("fix" in report && "rawLat" in report.fix && "rawLon" in report.fix) {
+            local fix = report.fix;
             persist.setLocation(fix.rawLat, fix.rawLon);
         }
 
