@@ -60,7 +60,7 @@
 // Wake every x seconds to check sensors for alert conditions (sleep time is base on this)
 const CHECK_IN_TIME            = 60;
 // Send a report, regaurdless of check/alert conditions
-const REPORT_TIME_SEC          = 86400;
+const REPORT_TIME_SEC          = 1800 // changed back to 86400 after testing completed
 // Maximum time to stay awake (Should be greater than LOCATION_TIMEOUT_SEC)
 const MAX_WAKE_TIME            = 65;
 
@@ -503,15 +503,16 @@ class MainController {
 
     function onMovementCheckTasksComplete(taskValues, impactAlert) {
         // Collect reading values
-        local gpsFix        = taskValues[0];
-        local envReadings   = taskValues[1];
-        local batteryStatus = taskValues[2];
-        local accelReading  = (impactAlert != null) ? impactAlert.magnitude : null;
+        local gpsFix          = taskValues[0];
+        local envReadings     = taskValues[1];
+        local batteryStatus   = taskValues[2];
+        local haveImpactAlert = (impactAlert != null);
+        local accelReading    = haveImpactAlert ? impactAlert.magnitude : null;
 
         // Calculate if we have moved a significant distance
         local distance = checkDistance(gpsFix);
         // Store new alerts if needed
-        local alertsUpdated = checkAlerts(envReadings, batteryStatus, impactAlrtUpdated);
+        local alertsUpdated = checkAlerts(envReadings, batteryStatus, haveImpactAlert);
 
         if (alertsUpdated || distance != null) {
             // Send report

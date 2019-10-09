@@ -74,23 +74,13 @@ class MainController {
     function processReport(payload, customAck) {
         local report = payload.data;
 
+        // Ack report immediately
+        local ack = customAck();
+        ack();
+
         // Log status report from device
-        ::debug("[Main] Recieved status update from device: ");
-        ::debug("--------------------------------------------------------------");
-        ::debug(http.jsonencode(report));
-
-        if ("fix" in report) {
-            local fix = report.fix;
-            ::debug("[Main] Location details: ");
-            ::debug("[Main] Fix time " + fix.time);
-            ::debug("[Main] Seconds to first fix: " + fix.secTo1stFix);
-            ::debug("[Main] Seconds to accurate fix: " + fix.secToFix);
-            ::debug("[Main] Fix type: " + getFixDescription(fix.fixType));
-            ::debug("[Main] Fix accuracy: " + fix.accuracy + " meters");
-            ::debug("[Main] Latitude: " + fix.lat + ", Longitude: " + fix.lon);
-        }
-        ::debug("--------------------------------------------------------------");
-
+        printReportData(report);
+        
         // Send device data to cloud service
         cloud.send(report);
     }
@@ -142,6 +132,83 @@ class MainController {
                 return "time-only fix";
             default: 
                 return "unknown";
+        }
+    }
+
+    function printReportData(report) {
+        ::debug("[Main] Recieved status update from device:");
+        ::debug("--------------------------------------------------------------");
+        ::debug("[Main] Raw report: ");
+        ::debug(http.jsonencode(report));
+
+        if ("ts" in report) ::debug("[Main] Report created at: " + formatDate(report.ts));
+        if ("secSinceBoot" in report) ::debug("[Main] Report sent " + report.secSinceBoot + "s after device booted");
+
+        ::debug("[Main] Telemetry details: ");
+        if ("magnitude" in report)   ::debug("[Main]   Magnitude: "   + report.magnitude   + " Gs");
+        if ("temperature" in report) ::debug("[Main]   Temperature: " + report.temperature + "°C");
+        if ("humidity" in report)    ::debug("[Main]   Humidity: "    + report.humidity    + "%");
+
+        
+        if ("battStatus" in report) { 
+            local status = report.battStatus;
+            ::debug("[Main] Battery Status details:");
+            if ("capacity" in status) ::debug("[Main]   Remaining battery capacity: " + status.capacity + " mAh");
+            if ("percent" in status)  ::debug("[Main]   Remaining battery " + status.percent + "%");
+        }
+
+        if ("fix" in report) {
+            local fix = report.fix;
+            ::debug("[Main] Location details: ");
+            ::debug("[Main]   Fix time " + fix.time);
+            ::debug("[Main]   Seconds to first fix: " + fix.secTo1stFix);
+            ::debug("[Main]   Seconds to accurate fix: " + fix.secToFix);
+            ::debug("[Main]   Fix type: " + getFixDescription(fix.fixType));
+            ::debug("[Main]   Fix accuracy: " + fix.accuracy + " meters");
+            ::debug("[Main]   Latitude: " + fix.lat + ", Longitude: " + fix.lon);
+        }
+        if ("cellInfo" in report) ::debug("[Main] Location data not available. Cell info: " + report.cellInfo);
+
+        if ("movement" in report) ::debug("[Main] Movement detected: " + report.movement);
+        if ("alerts" in report) {
+            local alerts    = report.alerts;
+            local numAlerts = alerts.len();
+            if (numAlerts > 0) {
+                ::debug("[Main] " + numAlerts + " alerts detected:");
+                foreach(idx, alert in alerts) {
+                    ::debug("[Main] Alert " + idx + " details:");
+                    ::debug("[Main]   Alert type: " + alert.type);
+                    ::debug("[Main]   Alert description: " + getAlertTypeDescription(alert.type));
+                    ::debug("[Main]   Alert trigger: " + alert.trigger);
+                    ::debug("[Main]   Alert created at: " + formatDate(alert.created));
+                    if (alert.resolved != 0) ::debug("[Main]   Alert condition resolved at: " + formatDate(alert.resolved));
+                    ::debug("[Main] Raw alert table: ");
+                    ::debug(http.jsonencode(alert));
+                }
+            }
+        }
+        ::debug("--------------------------------------------------------------");
+    }
+
+    function formatDate(t = null) {
+        local d = (t == null) ? date() : date(t);
+        return format("%04d-%02d-%02d %02d:%02d:%02d", d.year, (d.month+1), d.day, d.hour, d.min, d.sec);
+    }
+
+    function getAlertTypeDescription(type) {
+        switch(type) {
+            case ALERT_TYPE.TEMP_LOW: 
+                return "Temperature out of range: LOW";
+            case ALERT_TYPE.TEMP_HIGH: 
+                return "Temperature out of range: HIGH";
+            case ALERT_TYPE.HUMID_LOW: 
+                return "Humidity out of range: LOW";
+            case ALERT_TYPE.HUMID_HIGH: 
+                return "Humidity out of range: HIGH";
+            case ALERT_TYPE.BATTERY_LOW: 
+                return "Battery running low";
+            case ALERT_TYPE.SHOCK: 
+                return "Shock detected";
         }
     }
 

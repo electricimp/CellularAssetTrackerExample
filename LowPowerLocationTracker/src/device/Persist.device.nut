@@ -24,6 +24,10 @@
 
 // Persistant Storage File
 
+// NOTE: Assist Offline Messages are store with date string file names
+// formatted as YYYYMMDD. These messages are purged when stale using a 
+// check based on file name length. If a file name has a length of 8 please
+// update _isAssistOfflineDateFile method.
 enum PERSIST_FILE_NAMES {
     WAKE_TIME              = "wake", 
     REPORT_TIME            = "report",
@@ -316,11 +320,7 @@ class Persist {
             foreach(file in files) {
                 local name = file.fname;
                 // Find assist files for dates that have already passed
-                if (name != PERSIST_FILE_NAMES.WAKE_TIME &&
-                    name != PERSIST_FILE_NAMES.REPORT_TIME && 
-                    name != PERSIST_FILE_NAMES.LOCATION &&
-                    name != PERSIST_FILE_NAMES.OFFLINE_ASSIST_CHECKED &&
-                    _isStale(name)) {
+                if (_isAssistOfflineDateFile(name) && _isStale(name)) {
                         ::debug("[Persist] Erasing SFFS file name: " + name);
                         // Erase old assist message
                         _sffs.eraseFile(name);
@@ -331,9 +331,19 @@ class Persist {
         }
     }
 
+    function _isAssistOfflineDateFile(name) {
+        // TODO: Update this if file names change!!!
+        // NOTE: 
+            // File names: wake(4), report(6), offAssistChecked(16), move(4),
+            // loc(3), alerts(8)
+            // Offline assist file name are Date strings formatted YYYYMMDD, so 
+            // have a length of 8 
+        return (name.len() == 8);
+    }
+
     function _isStale(name) {
-        // Unexpected file name erase it
-        if (name.len() != 8) return true; 
+        // Unexpected file name length don't erase it
+        if (name.len() != 8) return false; 
 
         local today = date();
         local year  = today.year;   
@@ -361,7 +371,7 @@ class Persist {
         } catch(e) {
             ::error("[Persist] Error converitng file name to integer: " + name);
             // Don't erase file
-            return true;
+            return false;
         }
     }
 
