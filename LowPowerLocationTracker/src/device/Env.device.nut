@@ -68,6 +68,7 @@ class Env {
     }
 
     function _checkReading(reading, min, max) {
+        // ::debug("[Env] Checking reading: " + reading + " min " + min + " max " + max);
         if (reading < min) return ALERT_DESC.LOW;
         if (reading > max) return ALERT_DESC.HIGH;
         return ALERT_DESC.IN_RANGE;

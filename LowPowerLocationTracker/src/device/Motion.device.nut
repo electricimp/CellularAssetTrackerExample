@@ -25,9 +25,11 @@
 // Motion Monitoring File
 
 // Number of readings per sec
-const ACCEL_DATA_RATE    = 100;
+const ACCEL_DATA_RATE           = 100;
 // Number of readings condition must be true before int triggered 
-const ACCEL_INT_DURATION = 50;  
+const ACCEL_MOVE_INT_DURATION   = 50;  
+// Number of readings condition must be true before int triggered 
+const ACCEL_IMPACT_INT_DURATION = 5;
 
 // Manages Motion Sensing  
 // Dependencies: LIS3DH (may configure sensor i2c)
@@ -41,20 +43,38 @@ class Motion {
         accel = LIS3DH(SENSOR_I2C, ACCEL_ADDR);
     }
 
-    function enable(threshold, onInterrupt = null) {
+    function enable(threshold, enImpact = false, onInterrupt = null) {
         ::debug("[Motion] Enabling motion detection");
 
-        configIntWake(onInterrupt);
-        
         // Configures and enables motion interrupt
+        enableAccel();
+        if (enImpact) {
+            enableImpact();
+            ::debug("Motion] Enabling impact detection");
+        }
+        enMotionDetect(threshold, ACCEL_MOVE_INT_DURATION, onInterrupt);
+    }
+
+    function enableAccel() {
         accel.reset();
         accel.setDataRate(ACCEL_DATA_RATE);
         accel.setMode(LIS3DH_MODE_LOW_POWER);
         accel.enable(true);
+    }
+
+    function enMotionDetect(threshold, dur, onInterrupt = null) {
+        configIntWake(onInterrupt);
         accel.configureHighPassFilter(LIS3DH_HPF_AOI_INT1, LIS3DH_HPF_CUTOFF1, LIS3DH_HPF_NORMAL_MODE);
         accel.getInterruptTable();
-        accel.configureInertialInterrupt(true, threshold, ACCEL_INT_DURATION);
+        accel.configureInertialInterrupt(true, threshold, dur);
         accel.configureInterruptLatching(false);
+    }
+
+    function enableImpact() {
+        // Clear buffer if overrun has occurred
+        accel.configureFifo(true, LIS3DH_FIFO_BYPASS_MODE);
+        // Re-enable buffer
+        accel.configureFifo(true, LIS3DH_FIFO_STREAM_TO_FIFO_MODE);
     }
 
     function configIntWake(onInterrupt = null) {
@@ -68,13 +88,18 @@ class Motion {
         }
     }
 
-    // This method does NOT clear the latched interrupt pin. It disables the accelerometer and reconfigures wake pin.  
+    // This method does NOT clear the latched interrupt pin. 
+    // It disables the accelerometer, high pass filter, interrupt, FIFO buffer 
+    // and reconfigures wake pin.  
     function disable() {
         ::debug("[Motion] Disabling motion detection");
 
         // Disables accelerometer 
         accel.setDataRate(0);
         accel.enable(false);
+
+        // Set FIFO buffer to bypass mode
+        accel.configureFifo(false);
 
         // Disable accel interrupt and high pass filter
         accel.configureHighPassFilter(LIS3DH_HPF_DISABLED);
@@ -127,57 +152,50 @@ class Motion {
         }
     }
 
-    // Note: This is blocking, use only when wake on interrupt to
-    // try and get impact measurement before doing anything else
     function checkImpact(thresh) {
-        local shouldDisable = false;
-        if (!_isAccelEnabled()) {
-            // Enable accel
-            accel.setDataRate(ACCEL_DATA_RATE);
-            accel.enable(true);
-            shouldDisable = true;
-        }
+        if (!_isAccelImpactEnabled()) return;
 
-        local max        = 0;
-        local alert      = null;
-        local numSamples = 32;
-        local last = numSamples - 1;
-        for (local i = 0; i < numSamples; i++) {
-            local r = accel.getAccel();
-            if ("error" in r) continue;
-            local x = r.x;
-            local y = r.y;
-            local z = r.z;
-            local sr = math.sqrt(x*x + y*y + z*z);
-            if (sr > max) {
-                max   = sr;
-                alert = {
-                    "raw"       : r,
-                    "magnitude" : sr
-                }
-            }
-            if (i != last) {
-                imp.sleep(0.003);
-            } else if (alert == null) {
-                alert = {
-                    "raw"       : r,
-                    "magnitude" : sr
-                }
+        // Get data from FIFO buffer, determine the maximum magnitude
+        local stats = accel.getFifoStats();
+        local max = null;
+        local raw = null;
+        for (local i = 0 ; i < stats.unread ; i++) {
+            local data = accel.getAccel();
+            local mag = getMagnitude(data);
+            if (mag != null && mag > max) {
+                max = mag;
+                raw = data;
             }
         }
 
-        if (shouldDisable) {
-            // Disable accel
-            accel.setDataRate(0);
-            accel.enable(false);
+        // Reset FIFO Buffer
+        enableImpact();
+
+        local alert = {
+            "impactDetected" : (max != null && max > thresh),
+            "raw"            : raw, 
+            "magnitude"      : max, 
+            "ts"             : time()
         }
 
-        if (alert != null) {
-            alert.impactDetected <- (max >= thresh); 
-            alert.ts             <- time();
+        if (alert.impactDetected) {
+            ::debug(format("Max mag: %f, Accel (x,y,z): [%f, %f, %f]", max, raw.x, raw.y, raw.z));
         }
 
         return alert;
+    }
+
+    function getMagnitude(data) {
+        if (data == null) return null;
+
+        if ("x" in data && "y" in data && "z" in data) {
+            local x = data.x;
+            local y = data.y;
+            local z = data.z;
+            return math.sqrt(x*x + y*y + z*z);
+        }
+        
+        return null;
     }
 
     // Helper returns bool if accel is enabled
@@ -192,6 +210,11 @@ class Motion {
         // bit 7 inertial interrupt is enabled,
         local val = accel._getReg(LIS3DH_CTRL_REG3);
         return (val & 0x40) ? true : false;
+    }
+
+    function _isAccelImpactEnabled() {
+        local val = accel._getReg(LIS3DH_FIFO_CTRL_REG);
+        return (val & 0xC0) ? true : false;
     }
 
 }

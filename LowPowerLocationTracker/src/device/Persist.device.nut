@@ -52,8 +52,11 @@ class Persist {
     constructor() {
         // TODO: Update with more optimized circular buffer.
         // TODO: Optimize erases to happen when it won't keep device awake
-        _sffs = SPIFlashFileSystem(0x000000, 0x200000);
-        _sffs.init();
+
+        // NOTE: Currently set to use the entire flash. If SPI flash is needed
+        // for any other part of the application adjust the start and end here
+        _sffs = SPIFlashFileSystem();
+        _sffs.init(_onInit.bindenv(this));
     }
 
     // For debug purposes
@@ -99,7 +102,7 @@ class Persist {
 
         local moved = _readFile(PERSIST_FILE_NAMES.MOVE_DETECTED);
         if (moved != null) {
-            moveDetected = (move.readn('b') == 1);
+            moveDetected = (moved.readn('b') == 1);
         } else {
             // Movement is only stored when an event has happened. If no file 
             // has been stored, then no movement event has happened.
@@ -234,13 +237,24 @@ class Persist {
     function storeAlerts(newAlerts) {
         if (newAlerts == null || newAlerts.len() == 0) {
             alerts = null;
-            if (_sffs.fileExists(fname)) _sffs.eraseFile(fname);
+            if (_sffs.fileExists(PERSIST_FILE_NAMES.ALERTS)) _sffs.eraseFile(PERSIST_FILE_NAMES.ALERTS);
 
             ::debug("[Persist] No alerts stored");
         } else {
+            // Update local copy
             alerts = newAlerts;
-            _writeFile(PERSIST_FILE_NAMES.ALERTS, _serializeAlerts(alerts));
+            
+            ::debug("[Persist] Storing " + newAlerts.len() + " alerts.");
+            ::debug("--------------------------------------------------------");
+            foreach(alert in alerts) {
+                foreach(k, v in alert) {
+                    ::debug("[Persist] Alert table, k: " + k + " v: " + v);
+                }
+            }
+            ::debug("--------------------------------------------------------");
 
+            // Update stored copy
+            _writeFile(PERSIST_FILE_NAMES.ALERTS, _serializeAlerts(alerts));
             ::debug("[Persist] New alerts stored. Number of alerts: " + alerts.len());
         }
     }
@@ -360,6 +374,7 @@ class Persist {
             b.writeblob(_serializeAlert(alert));
         }
 
+        b.seek(0, 'b');
         return b;
     }
 

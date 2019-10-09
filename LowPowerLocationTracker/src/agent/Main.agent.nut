@@ -25,8 +25,9 @@
 // Agent Main Application File
 
 // Libraries 
-#require "MessageManager.lib.nut:2.4.0"
+#require "Messenger.lib.nut:0.1.0"
 #require "UBloxAssistNow.agent.lib.nut:1.0.0"
+#require "GoogleMaps.agent.lib.nut:1.0.1" 
 // TODO: ADD YOUR CLOUD SERVICE LIBRARY HERE
 
 // Supporting files
@@ -39,10 +40,13 @@
 // Main Application
 // -----------------------------------------------------------------------
 
+// Max time to wait for agent/device message ack
+const MSG_ACK_TIMEOUT          = 10;
+
 class MainController {
     
     loc   = null;
-    mm    = null;
+    msgr  = null;
     cloud = null;
 
     constructor() {
@@ -54,20 +58,21 @@ class MainController {
         // Initialize Assist Now Location Helper
         loc = Location();
 
-        // Initialize Message Manager
-        mm = MessageManager();
+        // Initialize Messenger for agent/device communication 
+        // Defaults: message ackTimeout set to 10s, max num msgs 10, default msg ids
+        msgr = Messenger({"ackTimeout" : MSG_ACK_TIMEOUT});
 
         // Open listeners for messages from device
-        mm.on(MSG_REPORT, processReport.bindenv(this));
-        mm.on(MSG_ASSIST, getAssist.bindenv(this));
+        msgr.on(MSG_REPORT, processReport.bindenv(this));
+        msgr.on(MSG_ASSIST, getAssist.bindenv(this));
 
         // Initialize Cloud Service
         // NOTE: Cloud service class is empty and will initialize an empty framework 
         cloud = Cloud();
     }
 
-    function processReport(msg, reply) {
-        local report = msg.data;
+    function processReport(payload, customAck) {
+        local report = payload.data;
 
         // Log status report from device
         ::debug("[Main] Recieved status update from device: ");
@@ -90,8 +95,10 @@ class MainController {
         cloud.send(report);
     }
 
-    function getAssist(msg, reply) {
-        switch (msg.data) {
+    function getAssist(payload, customAck) {
+        local reply = customAck();
+
+        switch (payload.data) {
             case ASSIST_TYPE.OFFLINE:
                 ::debug("[Main] Requesting offline assist messages from u-blox webservice");
                 loc.getOfflineAssist(function(assistMsgs) {
@@ -113,7 +120,7 @@ class MainController {
                 }.bindenv(this))
                 break;
             default: 
-                ::error("[Main] Unknown assist request from device: " + msg.data);
+                ::error("[Main] Unknown assist request from device: " + payload.data);
         }
 
 

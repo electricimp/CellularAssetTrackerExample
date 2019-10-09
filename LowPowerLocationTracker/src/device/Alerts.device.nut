@@ -55,7 +55,7 @@ AlertManager <- {
         // Each impact is a new alert, so just add it to 
         // the alerts array
         if (new != null && new.impactDetected) {
-            local alert =  _createAlertTable(
+            local alert = _createAlertTable(
                 ALERT_TYPE.SHOCK,
                 new.magnitude,
                 new.ts,
@@ -162,10 +162,14 @@ AlertManager <- {
     // Sets all reported flags to true
     "clearReported" : function(alerts) {
         if (alerts == null) return;
+
+        local newAlerts = [];
         foreach (idx, alert in alerts) {
+            if (alert.resolved > 0) continue;
             if (alert.reported == false) alerts[idx]["reported"] = true;
+            newAlerts.push(alert);
         }
-        return alerts;
+        return newAlerts;
     },
 
     "haveUnreportedAlerts" : function(alerts) {
@@ -250,7 +254,7 @@ AlertManager <- {
         local humidAlertDesc = new.humidAlert;
         local lastHumidAlert = getLatestHumidAlert(stored);
 
-        // No temp alerts stored, but we have a new temp alert
+        // No humid alerts stored, but we have a new temp alert
         if (humidAlertDesc != ALERT_DESC.IN_RANGE && lastHumidAlert == null) {
             // Create new alert
             local alert = _createAlertTable(
@@ -266,7 +270,7 @@ AlertManager <- {
             return true;
         }
 
-        // Temp alert condtion cleared, update temp alert
+        // Temp humid condtion cleared, update temp alert
         if (humidAlertDesc == ALERT_DESC.IN_RANGE && lastHumidAlert != null) {
             // Update resolved and reported values
             local alert = _createAlertTable(
