@@ -50,7 +50,7 @@ class Motion {
         enableAccel();
         if (enImpact) {
             enableImpact();
-            ::debug("Motion] Enabling impact detection");
+            ::debug("[Motion] Enabling impact detection");
         }
         enMotionDetect(threshold, ACCEL_MOVE_INT_DURATION, onInterrupt);
     }
@@ -179,7 +179,7 @@ class Motion {
         }
 
         if (alert.impactDetected) {
-            ::debug(format("Max mag: %f, Accel (x,y,z): [%f, %f, %f]", max, raw.x, raw.y, raw.z));
+            ::debug(format("[Motion] Max mag: %f, Accel (x,y,z): [%f, %f, %f]", max, raw.x, raw.y, raw.z));
         }
 
         return alert;

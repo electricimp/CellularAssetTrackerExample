@@ -597,7 +597,7 @@ class MainController {
 
             // We should report if any of the following conditions exists
             if (persist.getReportTime() <= time() || !validTimestamp() || persist.getLocation() == null ||
-                AlertManager.haveUnreportedAlerts(persist.getAlerts())) {
+                AlertManager.checkForUnreported(persist.getAlerts())) {
                     // We have a condition that should trigger a report, connect and 
                     // resolve immediately to trigger sending report flow
                     cm.connect();

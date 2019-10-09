@@ -49,6 +49,7 @@ AlertManager <- {
         foreach(alert in stored) {
             if (!alert.reported) return true;
         }
+        return false;
     },
 
     "checkImpactAlert" : function(stored, new) {
@@ -170,14 +171,6 @@ AlertManager <- {
             newAlerts.push(alert);
         }
         return newAlerts;
-    },
-
-    "haveUnreportedAlerts" : function(alerts) {
-        if (alerts == null) return false;
-        foreach (alert in alerts) {
-            if (alert.reported) return true;
-        }
-        return false;
     },
 
     "_checkTemp" : function(stored, new) {

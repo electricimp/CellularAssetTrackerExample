@@ -62,11 +62,11 @@ class Persist {
     // For debug purposes
     function _onInit(files) {
         // Log how many files we found
-        ::debug(format("Found %d files", files.len()));
+        ::debug(format("[Persist] Found %d files", files.len()));
 
         // Log all the information returned about each file:
         foreach(file in files) {
-            ::debug(format("  %d: %s (%d bytes)", file.id, file.fname, file.size));
+            ::debug(format("[Persist]  %d: %s (%d bytes)", file.id, file.fname, file.size));
         }
     }
 
@@ -120,8 +120,8 @@ class Persist {
         local rawLoc = _readFile(PERSIST_FILE_NAMES.LOCATION);
         if (rawLoc != null) {
             location = {};
-            location.lat <- rt.readn('i');
-            location.lon <- rt.readn('i');
+            location.lat <- rawLoc.readn('i');
+            location.lon <- rawLoc.readn('i');
         }
 
         // Return location or null if it is not found
