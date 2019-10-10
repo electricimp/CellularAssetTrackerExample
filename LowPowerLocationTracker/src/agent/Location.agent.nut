@@ -105,22 +105,31 @@ class Location {
         ::debug("[Location] Requesting Location from GoogleMaps API using Cell info...");
         local req = http.post(url, headers, http.jsonencode(body));
         req.sendasync(function(resp) {
-            local parsed   = null;
-            local location = null;
+            local parsed     = null;
+            local location   = null;
+            local statuscode = resp.statuscode;
+    
+            ::debug("[Location] Geolocation response: " + statuscode);
+
             try {
                 parsed = http.jsondecode(resp.body);
             } catch(e) {
                 ::error("[Location] Geolocation parsing error: " + e);
             }
             
-            if (resp.statuscode == 200) {
-                local l = parsed.location;
-                location = {
-                    "lat" : l.lat,
-                    "lon" : l.lng
-                }
+            if (statuscode == 200) {
+                try {
+                    local l = parsed.location;
+                    location = {
+                        "accuracy" : parsed.accuracy,
+                        "lat"      : l.lat,
+                        "lon"      : l.lng
+                    }
+                } catch(e) {
+                    ::error("[Location] Geolocation response parsing error: " + e);
+                } 
             } else {
-                ::error("[Location] Geolocation unexpected reponse: " + resp.statuscode);
+                ::error("[Location] Geolocation unexpected reponse: " + statuscode);
             }
             
             cb(location);
@@ -187,7 +196,7 @@ class Location {
         }
             
         try {
-            local str = split(cellinfo, ",");
+            local str = split(cellInfo, ",");
 
             switch(str[0]) {
                 case "4G" :

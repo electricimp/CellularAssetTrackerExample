@@ -78,11 +78,22 @@ class MainController {
         local ack = customAck();
         ack();
 
-        // Log status report from device
-        printReportData(report);
-        
-        // Send device data to cloud service
-        cloud.send(report);
+        if (!("fix" in report) && "cellInfo" in report) {
+            // Use cell info from device to get location from 
+            // Google maps API
+            local cellStatus = loc.parseCellInfo(report.cellInfo);
+            loc.getLocCellInfo(cellStatus, function(location) {
+                if (location != null) {
+                    report.cellInfoLoc <- location;
+                }
+
+                // Log status report from device
+                printReportData(report);
+
+                // Send device data to cloud service
+                cloud.send(report);
+            }.bindenv(this))
+        }
     }
 
     function getAssist(payload, customAck) {
@@ -159,7 +170,7 @@ class MainController {
 
         if ("fix" in report) {
             local fix = report.fix;
-            ::debug("[Main] Location details: ");
+            ::debug("[Main] Location fix details: ");
             ::debug("[Main]   Fix time " + fix.time);
             ::debug("[Main]   Seconds to first fix: " + fix.secTo1stFix);
             ::debug("[Main]   Seconds to accurate fix: " + fix.secToFix);
@@ -167,7 +178,16 @@ class MainController {
             ::debug("[Main]   Fix accuracy: " + fix.accuracy + " meters");
             ::debug("[Main]   Latitude: " + fix.lat + ", Longitude: " + fix.lon);
         }
-        if ("cellInfo" in report) ::debug("[Main] Location data not available. Cell info: " + report.cellInfo);
+
+        if ("cellInfo" in report) {
+            ::debug("[Main] Location cell info details: ");
+            ::debug("[Main]   Location data not available. Cell info: " + report.cellInfo);
+            if ("cellInfoLoc" in report) {
+                local loc = report.cellInfoLoc;
+                ::debug("[Main]   Fix accuracy: " + loc.accuracy + " meters");
+                ::debug("[Main]   Latitude: " + loc.lat + ", Longitude: " + loc.lon);
+            }
+        }
 
         if ("movement" in report) ::debug("[Main] Movement detected: " + report.movement);
         if ("alerts" in report) {

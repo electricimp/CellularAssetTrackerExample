@@ -215,7 +215,7 @@ class Location {
 
     function _onACK(payload) {
         ::debug("[Location] In Location ACK_ACK msg handler...");
-        ::debug("-----------------------------------------");
+        ::debug("---------------------------------------------");
 
         local parsed = UbxMsgParser[UBX_MSG_PARSER_CLASS_MSG_ID.ACK_ACK](payload);
         if (parsed.error != null) {
@@ -224,7 +224,7 @@ class Location {
             ::debug(format("[Location] ACK-ed msgId: 0x%04X", parsed.ackMsgClassId));
         }
 
-        ::debug("-----------------------------------------");
+        ::debug("---------------------------------------------");
     }
 
     function _onNAK(payload) {

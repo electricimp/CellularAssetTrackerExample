@@ -62,7 +62,7 @@ const CHECK_IN_TIME            = 60;
 // Send a report, regaurdless of check/alert conditions
 const REPORT_TIME_SEC          = 1800 // changed back to 86400 after testing completed
 // Maximum time to stay awake (Should be greater than LOCATION_TIMEOUT_SEC)
-const MAX_WAKE_TIME            = 65;
+const MAX_WAKE_TIME            = 75;
 
 // Maximum time to wait for GPS to get a fix, before trying to send report
 // NOTE: This should be less than the MAX_WAKE_TIME
@@ -94,7 +94,7 @@ const HUMID_THRESHOLD_HIGH     = 90;
 // Humidity below alert threshold will trigger alert
 const HUMID_THRESHOLD_LOW      = 0;
 // Force in Gs that will trigger impact alert
-const IMPACT_THRESHOLD         = 2.0;
+const IMPACT_THRESHOLD         = 2.5;
 
 // Limit requests to UBlox Offline assist 
 // From datasheet - data updated every 12/24h (12 * 60 * 60 = 43200) 
@@ -434,6 +434,7 @@ class MainController {
 
     function onImpactPinStateChange() {
         if (ACCEL_INT.read == 0) return;
+        ::debug("[Main] In impact interrupt pin state change callback");
 
         // Shouldn't need this, but doesn't hurt to trigger
         // just in case - set movement flag to true
@@ -447,6 +448,7 @@ class MainController {
 
     function onMovePinStateChange() {
         if (ACCEL_INT.read == 0) return;
+        ::debug("[Main] In movement interrupt pin state change callback");
 
         // Checks for movement, this releases int pin if it is latched.
         local moved = move.detected();
@@ -483,6 +485,7 @@ class MainController {
     }
 
     function onReportingTasksComplete(taskValues) {
+        ::debug("[Main] Reporting Tasks completed");
         // Collect reading values
         local gpsFix        = taskValues[0];
         local envReadings   = taskValues[1];
@@ -490,71 +493,93 @@ class MainController {
         local batteryStatus = taskValues[3];
         local distance      = null; 
 
-        // Update alerts based on new readings
-        checkAlerts(envReadings, batteryStatus);
+        // Store/update alerts based on new env readings
+        checkForEnvAlerts(envReadings, batteryStatus);
 
         // Only calculate distance if we have moved
         if (persist.getMoveDetected()) distance = checkDistance(gpsFix);
 
         // Send report
+        ::debug("[Main] Creating report");
         local report = createReport(persist.getAlerts(), envReadings, batteryStatus, accelReading, gpsFix, distance);
         sendReport(report);
     }
 
     function onMovementCheckTasksComplete(taskValues, impactAlert) {
+        ::debug("[Main] Movement Check Tasks completed");
+        
         // Collect reading values
         local gpsFix          = taskValues[0];
         local envReadings     = taskValues[1];
         local batteryStatus   = taskValues[2];
-        local haveImpactAlert = (impactAlert != null);
-        local accelReading    = haveImpactAlert ? impactAlert.magnitude : null;
+        local accelReading    = (impactAlert != null) ? impactAlert.magnitude : null;
+        // Store/update alerts based on new env readings
+        local alertsUpdated   = checkForEnvAlerts(envReadings, batteryStatus);
 
         // Calculate if we have moved a significant distance
         local distance = checkDistance(gpsFix);
-        // Store new alerts if needed
-        local alertsUpdated = checkAlerts(envReadings, batteryStatus, haveImpactAlert);
+        
+        // Check for unreported alerts
+        local alerts = persist.getAlerts();
+        local havePendingAlerts = AlertManager.checkForUnreported(alerts);
 
-        if (alertsUpdated || distance != null) {
+        if (alertsUpdated || havePendingAlerts || distance != null) {
+            ::debug("[Main] Have conditions to report...");
             // Send report
-            local report = createReport(persist.getAlerts(), envReadings, batteryStatus, accelReading, gpsFix, distnace);
+            local report = createReport(alerts, envReadings, batteryStatus, accelReading, gpsFix, distance);
             sendReport(report);
         } else {
+            ::debug("[Main] No conditions to report, powering down.");
             powerDown();
         }
     }
 
     function onAlertCheckLocTasksComplete(taskValues) {
+        ::debug("[Main] Alert Check Get Location Tasks completed");
         // Collect reading values
         local gpsFix        = taskValues[0];
         local envReadings   = taskValues[1];
         local accelReading  = taskValues[2];
         local batteryStatus = taskValues[3];
-        local alertsUpdated = checkAlerts(envReadings, batteryStatus);
-        local distance      = null; 
-
+        // Store/update alerts based on new env readings
+        local alertsUpdated = checkForEnvAlerts(envReadings, batteryStatus);
+ 
         // Only calculate distance if we have moved
+        local distance = null;
         if (persist.getMoveDetected()) distance = checkDistance(gpsFix);
 
-        if (alertsUpdated || distance != null) {
-            local report = createReport(persist.getAlerts(), envReadings, batteryStatus, accelReading, gpsFix, distance);
+        // Check for unreported alerts
+        local alerts = persist.getAlerts();
+        local havePendingAlerts = AlertManager.checkForUnreported(alerts);
+
+        if (alertsUpdated || havePendingAlerts || distance != null) {
+            ::debug("[Main] Have conditions to report...");
+            local report = createReport(alerts, envReadings, batteryStatus, accelReading, gpsFix, distance);
             sendReport(report);
         } else {
+            ::debug("[Main] No conditions to report, powering down.");
             powerDown();
         }
     }
 
     function onAlertCheckTasksComplete(taskValues) {
+        ::debug("[Main] Alert Check No Location Tasks completed");
         // Offline flow, check readings for alert conditions
         local envReadings   = taskValues[0];
         local batteryStatus = taskValues[1];
-        local alertsUpdated = checkAlerts(envReadings, batteryStatus);
+        // Store/update alerts based on new env readings
+        local alertsUpdated = checkForEnvAlerts(envReadings, batteryStatus);
 
-        // TODO: if GPS is powered up then int while awake triggered (handle this use case!!)
+        // Check for unreported alerts
+        local alerts = persist.getAlerts();
+        local havePendingAlerts = AlertManager.checkForUnreported(alerts);
 
-        if (alertsUpdated) {
-            local report = createReport(persist.getAlerts(), envReadings, batteryStatus);
+        if (alertsUpdated || havePendingAlerts) {
+            ::debug("[Main] Have conditions to report...");
+            local report = createReport(alerts, envReadings, batteryStatus);
             sendReport(report);
         } else {
+            ::debug("[Main] No conditions to report, powering down.");
             powerDown();
         }
     }
@@ -639,12 +664,14 @@ class MainController {
             env.checkTempHumid(TEMP_THRESHOLD_LOW, TEMP_THRESHOLD_HIGH,
                 HUMID_THRESHOLD_LOW, HUMID_THRESHOLD_HIGH, function(reading) {
                     if (reading != null) {
+                        ::debug("--------------------------------------------------------------------------");
                         ::debug("[Main] Get temperature and humidity complete:")
                         ::debug(format("[Main] Current Humidity: %0.2f %s, Current Temperature: %0.2f °C", reading.humidity, "%", reading.temperature));
                         
                         // TODO: check (should create alert, should update alert, should clear alert)
                         if (reading.tempAlert != ALERT_DESC.IN_RANGE)  ::debug("[Main] Temp reading not in range.");
                         if (reading.humidAlert != ALERT_DESC.IN_RANGE) ::debug("[Main] Humid reading not in range.");
+                        ::debug("--------------------------------------------------------------------------");
                     }
 
                     return resolve(reading);
@@ -655,10 +682,12 @@ class MainController {
     function getAccelReading() {
         return Promise(function(resolve, reject) {
             move.getAccelReading(function(reading) {
+                ::debug("--------------------------------------------------------------------------");
                 ::debug("[Main] Get accelerometer reading complete:");
                 if (reading != null) {
                     ::debug(format("[Main] Acceleration (G): x = %0.4f, y = %0.4f, z = %0.4f", reading.x, reading.y, reading.z));
                 } 
+                ::debug("--------------------------------------------------------------------------");
                 return resolve(move.getMagnitude(reading));
             }.bindenv(this));
         }.bindenv(this))
@@ -672,9 +701,11 @@ class MainController {
         local battery = Battery(false);
         return Promise(function(resolve, reject) {
             battery.checkStatus(BATTERY_THRESH_LOW, function(status) {
+                ::debug("--------------------------------------------------------------------------");
                 ::debug("[Main] Get battery status complete:")
                 ::debug("[Main] Remaining cell capacity: " + status.capacity + "mAh");
                 ::debug("[Main] Percent of battery remaining: " + status.percent + "%");
+                ::debug("--------------------------------------------------------------------------");
                 return resolve(status);
             }.bindenv(this));
         }.bindenv(this))
@@ -688,7 +719,7 @@ class MainController {
         persist.storeAlerts(updated);
     }
 
-    function checkAlerts(envReadings, batteryStatus, storeAlerts = false) {
+    function checkForEnvAlerts(envReadings, batteryStatus) {
         local alerts = persist.getAlerts();
 
         // Make sure to check/update all alert types base on new readings
@@ -696,7 +727,7 @@ class MainController {
         local envAlertsUpdated  = AlertManager.checkEnvAlert(alerts, envReadings);
         local battAlertsUpdated = AlertManager.checkBattAlert(alerts, batteryStatus);
 
-        if (storeAlerts || envAlertsUpdated || battAlertsUpdated) {
+        if (envAlertsUpdated || battAlertsUpdated) {
             // Stored alerts have been updated, re-store 
             persist.storeAlerts(alerts);
             // Return true to trigger report send
@@ -720,7 +751,7 @@ class MainController {
     }
 
     function checkDistance(fix) {
-        ::debug("[Main] Movement triggered location. Check distance...");
+        ::debug("[Main] Calculating distance...");
 
         // Woke on movement, check distance before reporting
         if ("rawLat" in fix && "rawLon" in fix) {
@@ -917,7 +948,10 @@ class MainController {
         // Ensure only one timer is set
         cancelMaxWakeTimeout();
         // Start a timer to power down after we have been awake for set time
-        maxWakeTimer = imp.wakeup(MAX_WAKE_TIME, powerDown.bindenv(this));
+        maxWakeTimer = imp.wakeup(MAX_WAKE_TIME, function() {
+            ::debug("[Main] Wake timer expired. Triggering power down...");
+            powerDown();
+        }.bindenv(this));
     }
 
     function cancelMaxWakeTimeout() {

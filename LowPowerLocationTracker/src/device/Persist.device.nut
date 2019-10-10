@@ -67,11 +67,12 @@ class Persist {
     function _onInit(files) {
         // Log how many files we found
         ::debug(format("[Persist] Found %d files", files.len()));
-
+        ::debug("--------------------------------------------------------------------------");
         // Log all the information returned about each file:
         foreach(file in files) {
             ::debug(format("[Persist]  %d: %s (%d bytes)", file.id, file.fname, file.size));
         }
+        ::debug("--------------------------------------------------------------------------");
     }
 
     function getWakeTime() {
