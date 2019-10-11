@@ -28,7 +28,7 @@
 #require "Messenger.lib.nut:0.1.0"
 #require "UBloxAssistNow.agent.lib.nut:1.0.0"
 #require "GoogleMaps.agent.lib.nut:1.0.1" 
-// TODO: ADD YOUR CLOUD SERVICE LIBRARY HERE
+#require "Losant.agent.lib.nut:1.0.0"
 
 // Supporting files
 @include __PATH__ + "/../shared/Logger.shared.nut"
@@ -78,6 +78,14 @@ class MainController {
         local ack = customAck();
         ack();
 
+        // Add alert description
+        if ("alerts" in report) {
+            local alerts    = report.alerts;
+            foreach(idx, alert in alerts) {
+                alerts[idx]["description"] <- getAlertTypeDescription(alert.type);
+            }
+        }
+
         if (!("fix" in report) && "cellInfo" in report) {
             // Use cell info from device to get location from 
             // Google maps API
@@ -89,11 +97,18 @@ class MainController {
 
                 // Log status report from device
                 printReportData(report);
-
                 // Send device data to cloud service
                 cloud.send(report);
-            }.bindenv(this))
-        }
+            }.bindenv(this));
+            
+            // Let cell location response trigger report send to cloud 
+            return;
+        } 
+
+        // Log status report from device
+        printReportData(report);
+        // Send device data to cloud service
+        cloud.send(report);
     }
 
     function getAssist(payload, customAck) {
@@ -198,7 +213,7 @@ class MainController {
                 foreach(idx, alert in alerts) {
                     ::debug("[Main] Alert " + idx + " details:");
                     ::debug("[Main]   Alert type: " + alert.type);
-                    ::debug("[Main]   Alert description: " + getAlertTypeDescription(alert.type));
+                    ::debug("[Main]   Alert description: " + alert.description);
                     ::debug("[Main]   Alert trigger: " + alert.trigger);
                     ::debug("[Main]   Alert created at: " + formatDate(alert.created));
                     if (alert.resolved != 0) ::debug("[Main]   Alert condition resolved at: " + formatDate(alert.resolved));
