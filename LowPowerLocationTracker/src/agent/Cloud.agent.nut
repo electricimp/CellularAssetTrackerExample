@@ -296,7 +296,7 @@ class Cloud {
         // Update if Alert condition is active
         if ("alerts" in data && data.alerts.len() > 0) {
             foreach(alert in data.alerts) {
-                if (alert.resolve != 0) {
+                if (alert.resolved != 0) {
                     switch(alert.type) {
                         case ALERT_TYPE.TEMP_LOW: 
                         case ALERT_TYPE.TEMP_HIGH:

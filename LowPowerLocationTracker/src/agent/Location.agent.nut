@@ -122,8 +122,8 @@ class Location {
                     local l = parsed.location;
                     location = {
                         "accuracy" : parsed.accuracy,
-                        "lat"      : l.lat,
-                        "lon"      : l.lng
+                        "lat"      : format("%f", l.lat),
+                        "lon"      : format("%f", l.lng)
                     }
                 } catch(e) {
                     ::error("[Location] Geolocation response parsing error: " + e);

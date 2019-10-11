@@ -61,8 +61,8 @@
 const CHECK_IN_TIME            = 60;
 // Send a report, regaurdless of check/alert conditions
 const REPORT_TIME_SEC          = 1800 // changed back to 86400 after testing completed
-// Maximum time to stay awake (Should be greater than LOCATION_TIMEOUT_SEC)
-const MAX_WAKE_TIME            = 75;
+// Maximum time to stay awake (Must be greater than LOCATION_TIMEOUT_SEC)
+const MAX_WAKE_TIME            = 120;
 
 // Maximum time to wait for GPS to get a fix, before trying to send report
 // NOTE: This should be less than the MAX_WAKE_TIME
