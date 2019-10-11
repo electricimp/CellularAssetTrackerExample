@@ -829,7 +829,7 @@ class MainController {
             cm.onNextConnect(function() {
                 // Add cell info if fix is not in report
                 ("fix" in report) ? _sendReport(report) : _addCellInfoAndSendReport(report);
-            });
+            }.bindenv(this));
             // NOTE: Calling connect if we are already connecting is ok, since  
             // ConnectionManager library manages this condition
             // Try to connect
