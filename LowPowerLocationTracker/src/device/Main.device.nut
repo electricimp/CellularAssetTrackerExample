@@ -424,11 +424,6 @@ class MainController {
             }.bindenv(this), onTasksFail.bindenv(this))
     }
 
-    function onTasksFail(reason) {
-        ::error("[Main] Promise rejected reason: " + reason);
-        powerDown();
-    }
-
     // Async Action Handlers
     // -------------------------------------------------------------
 
@@ -582,6 +577,11 @@ class MainController {
             ::debug("[Main] No conditions to report, powering down.");
             powerDown();
         }
+    }
+
+    function onTasksFail(reason) {
+        ::error("[Main] Promise rejected reason: " + reason);
+        powerDown();
     }
 
     // Stores fix data, and powers down the GPS
@@ -918,7 +918,7 @@ class MainController {
         ::debug("[Main] Time since code started: " + (now - bootTime) + "ms");
         ::debug("[Main] Going to sleep...");
 
-        lpm.sleepFor( getSleepTimer());
+        lpm.sleepFor(getSleepTimer());
     }
 
     // Timer Helpers
