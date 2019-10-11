@@ -44,7 +44,9 @@ class Persist {
     constructor() {
         // TODO: Update with more optimized circular buffer.
         // TODO: Optimize erases to happen when it won't keep device awake
-        _sffs = SPIFlashFileSystem(0x000000, 0x200000);
+        // Note: This currently is configured to use all the SPI Flash, update
+        // if another part of the application (ie ReplayMessanger) are added.
+        _sffs = SPIFlashFileSystem();
         _sffs.init();
     }
 
