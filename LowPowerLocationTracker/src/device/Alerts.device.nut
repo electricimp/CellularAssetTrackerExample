@@ -166,7 +166,9 @@ AlertManager <- {
 
         local newAlerts = [];
         foreach (idx, alert in alerts) {
+            // If alert has resolved don't add it to newAlerts array
             if (alert.resolved > 0) continue;
+            // Otherwise set all reporting flags to true, and add to newAlerts array
             if (alert.reported == false) alerts[idx]["reported"] = true;
             newAlerts.push(alert);
         }

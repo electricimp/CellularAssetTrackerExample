@@ -61,7 +61,10 @@
 const CHECK_IN_TIME            = 60;
 // Send a report, regaurdless of check/alert conditions
 const REPORT_TIME_SEC          = 1800 // changed back to 86400 after testing completed
-// Maximum time to stay awake (Must be greater than LOCATION_TIMEOUT_SEC)
+// Maximum time to stay awake (Must be greater than LOCATION_TIMEOUT_SEC) if you wish to 
+// report location
+// Currently set to get location (60s) and then connect and report (50s) if alert 
+// is noted before 
 const MAX_WAKE_TIME            = 120;
 
 // Maximum time to wait for GPS to get a fix, before trying to send report
@@ -338,7 +341,7 @@ class MainController {
 
 	    // NOTE: overwriteStoredConnectSettings method persistes the current time as the
         // next check-in and report time. This is only needed if CHECK_IN_TIME_SEC
-        // and/or REPORT_TIME_SEC have been changed - leave this while in development. 
+        // and/or REPORT_TIME_SEC have been changed. Reomove when not in active development. 
         overwriteStoredConnectSettings();
 
         // Enable movement monitor
@@ -361,7 +364,6 @@ class MainController {
         // No need to (re)enable movement detection, these settings
         // are stored in the accelerometer registers. Just need
         // to configure the wake pin.
-        // TODO: Sort out callback
         move.configIntWake(onMovePinStateChange.bindenv(this));
 
         // Check if report needed or if we are just checking for env/battery alerts 
@@ -383,10 +385,10 @@ class MainController {
         if (moved) persist.setMoveDetected(true);
 
         // Configure Interrupt Wake Pin, set impact thresholds and state change callback 
-        // while awake, then update to movement before we go back to sleep 
+        // while awake, then update to movement before we go back to sleep. This is reset
+        // to a movement interrupt during power down.
         // NOTE: Subtract 1G from impact threshold to compensate for HPF 
         move.enMotionDetect(IMPACT_THRESHOLD - 1, ACCEL_IMPACT_INT_DURATION, onImpactPinStateChange.bindenv(this));
-        // TODO: Must track this and re-set back to movement thresholds before sleep
 
         // Check for impact event
         local impactAlert = checkImpact();
@@ -427,20 +429,20 @@ class MainController {
     // Async Action Handlers
     // -------------------------------------------------------------
 
+    // Triggered when awake and impact interrupt conditions met
     function onImpactPinStateChange() {
         if (ACCEL_INT.read == 0) return;
         ::debug("[Main] In impact interrupt pin state change callback");
 
         // Shouldn't need this, but doesn't hurt to trigger
-        // just in case - set movement flag to true
+        // just in case. Set movement flag to true
         persist.setMoveDetected(true);
 
-        // Check for impact event
+        // Check for impact event. Updates stored alerts if needed
         checkImpact();
-        
-        // TODO: see how this loops back into reporting flows
     }
 
+    // Triggered when awake and movemnt interrupt conditions met
     function onMovePinStateChange() {
         if (ACCEL_INT.read == 0) return;
         ::debug("[Main] In movement interrupt pin state change callback");
@@ -451,10 +453,10 @@ class MainController {
         if (moved) persist.setMoveDetected(true);
 
         // Configure Interrupt Wake Pin, set impact thresholds and state change callback 
-        // while awake, then update to movement before we go back to sleep 
+        // while awake, then update to movement before we go back to sleep. Power down 
+        // method resets this to movement detection before sleep.
         // NOTE: Subtract 1G from impact threshold to compensate for HPF 
         move.enMotionDetect(IMPACT_THRESHOLD - 1, ACCEL_IMPACT_INT_DURATION, onImpactPinStateChange.bindenv(this));
-        // TODO: Must track this and re-set back to movement thresholds before sleep
 
         // Check for impact event 
         local impactAlert = checkImpact();
@@ -464,9 +466,10 @@ class MainController {
         local gettingLoc = areGettingLocation();
         if (gettingLoc || (!moved && impactAlert == null)) return;
 
-        // NOTE: If we are currently getting a location but have not yet received a fix the persisted
-        // movement flag will trigger a distance calculation before report is sent. If report is already 
-        // in flight then stored alerts will be caught at next check-in
+        // NOTE: 
+        // If report is already in flight then stored alerts will be caught at next check-in
+        // If we are currently getting a location but have not yet received a fix the persisted
+        // movement flag will trigger a distance calculation before report is sent. 
 
         // Not currently checking for a location
         if (!gettingLoc) {
@@ -479,6 +482,9 @@ class MainController {
         } 
     }
 
+    // Triggered during onBoot and onScheduledWake flows when it is
+    // determined that a report should be sent and all promise tasks
+    // have completed
     function onReportingTasksComplete(taskValues) {
         ::debug("[Main] Reporting Tasks completed");
         // Collect reading values
@@ -500,6 +506,8 @@ class MainController {
         sendReport(report);
     }
 
+    // Triggered during onMovementWake and onMovePinStateChange flows when
+    // movement has been detected and all promise tasks have completed
     function onMovementCheckTasksComplete(taskValues, impactAlert) {
         ::debug("[Main] Movement Check Tasks completed");
         
@@ -529,6 +537,10 @@ class MainController {
         }
     }
 
+    // Triggered during onBoot and onScheduledWake flows when it is
+    // determined that no report conditions have been met yet, it is
+    // determined that location should be checked, and all
+    // promise tasks have completed
     function onAlertCheckLocTasksComplete(taskValues) {
         ::debug("[Main] Alert Check Get Location Tasks completed");
         // Collect reading values
@@ -557,6 +569,10 @@ class MainController {
         }
     }
 
+    // Triggered during onBoot and onScheduledWake flows when it is
+    // determined that no report conditions have been met yet, it is
+    // determined that location should NOT be checked, and all
+    // promise tasks have completed
     function onAlertCheckTasksComplete(taskValues) {
         ::debug("[Main] Alert Check No Location Tasks completed");
         // Offline flow, check readings for alert conditions
@@ -579,6 +595,7 @@ class MainController {
         }
     }
 
+    // Triggered if an error occured while processing a promise
     function onTasksFail(reason) {
         ::error("[Main] Promise rejected reason: " + reason);
         powerDown();
@@ -612,8 +629,10 @@ class MainController {
     // -------------------------------------------------------------
 
     // Helper to kick off connection asap
-    // Returns promise with flag (should send report), base on current 
-    // connection status/report time/imp doesn't have a valid timestamp
+    // Returns promise, that checks the connection status, the next scheduled 
+    // report time, and if the imp has a valid timestamp. The promise should
+    // resolve if the reporting flow should be triggered, and reject if no 
+    // reporting conditions have been met
     function shouldReport() {
         return Promise(function(resolve, reject) {
             // Resolve - Should connect/send report
@@ -637,7 +656,9 @@ class MainController {
         }.bindenv(this))
     }
 
-    // Powers up GPS and starts location message filtering for accurate fix
+    // Powers up GPS and starts location message filtering for accurate fix.
+    // Returns a promise that resolves when either an accurate fix is found, 
+    // or the get location timeout has triggered
     function getLocation() {
         PWR_GATE_EN.write(1);
         haveAccFix = false;
@@ -653,7 +674,8 @@ class MainController {
         }.bindenv(this))
     }
 
-    // Initializes Env Monitor and gets temperature and humidity
+    // Initializes Env Monitor and gets temperature and humidity. Returns a
+    // promise that resolves when reading is complete
     function getEnvReadings() {
         // Get temperature and humidity reading
         // NOTE: I2C is configured when Motion class is initailized in the 
@@ -679,6 +701,7 @@ class MainController {
         }.bindenv(this))
     }
 
+    // Returns a promise that resolves after getting an accelerometer reading
     function getAccelReading() {
         return Promise(function(resolve, reject) {
             move.getAccelReading(function(reading) {
@@ -693,7 +716,8 @@ class MainController {
         }.bindenv(this))
     }
 
-    // Initializes Battery monitor and gets battery status
+    // Initializes Battery monitor and gets battery status. Returns a promise
+    // that resolves when status has been attained
     function getBattStatus() {
         // NOTE: I2C is configured when Motion class is initailized in the
         // constructor of this class, so we don't need to configure it here.
@@ -714,11 +738,16 @@ class MainController {
     // Actions 
     // -------------------------------------------------------------
 
+    // Helper that iterates over all alerts, deleting all that have been resolved 
+    // and setting all other's reported flags to true, then stores the updated alerts
     function clearAlerts() {
         local updated = AlertManager.clearReported(persist.getAlerts());
         persist.storeAlerts(updated);
     }
 
+    // Helper that takes raw reading values, and checks if any of those readings is
+    // in/out of range (based on alert conditions), then updates the stored 
+    // alerts as needed, creating new alerts or resolving existing alerts 
     function checkForEnvAlerts(envReadings, batteryStatus) {
         local alerts = persist.getAlerts();
 
@@ -737,6 +766,9 @@ class MainController {
         return false;
     }
 
+    // Helper that checks the readings stored in the accelerometer's FIFO buffer 
+    // to determine if an impact event has occured. If so, and alert is created 
+    // and stored
     function checkImpact() {
         local alerts            = persist.getAlerts();
         local impactAlert       = move.checkImpact(IMPACT_THRESHOLD);
@@ -750,6 +782,10 @@ class MainController {
         return impactAlert;
     }
 
+    // Helper that uses the current location and the stored (last reported) location 
+    // to determine if the distance the device has moved. If this disance is greater 
+    // than the distance threshold, then the distance is returned otherwise null 
+    // is returned 
     function checkDistance(fix) {
         ::debug("[Main] Calculating distance...");
 
@@ -788,6 +824,7 @@ class MainController {
         return null;
     }
 
+    // Takes raw data and returns a report table
     function createReport(alerts, envReadings, battStatus, accelReading = null, gpsFix = null, distance = null) {
         local report = {
             "secSinceBoot" : (hardware.millis() - bootTime) / 1000.0,
@@ -821,8 +858,9 @@ class MainController {
         return report;
     }
 
-    // Checks connection status, adds cell info if needed, then sends 
-    // device status report to agent
+    // Helper that checks connection status to either trigger a report send or 
+    // schedule a report send. This helper also adds a check to add cellInfo to 
+    // the report once the device is connected to the server.
     function sendReport(report) {
         if (!cm.isConnected()) {
             // Schedule a report send on next connect
@@ -840,7 +878,8 @@ class MainController {
         }
     }
 
-    // Adds cell info to report then send
+    // Helper that adds cell info to report then triggers the report send when 
+    // info request is completed
     function _addCellInfoAndSendReport(report) {
         imp.net.getcellinfo(function(cellInfo) {
             // Add cell info if fix is not in report
@@ -849,7 +888,7 @@ class MainController {
         }.bindenv(this))
     }
 
-    // Sends report to agent
+    // Helper that sends report to agent
     function _sendReport(report) {
         // MOVEMENT DEBUGGING LOG
         ::debug("[Main] Accel is enabled: " + move._isAccelEnabled() + ", accel int enabled: " + move._isAccelIntEnabled() + ", movement flag: " + persist.getMoveDetected());
@@ -862,7 +901,7 @@ class MainController {
     // Sleep Management
     // -------------------------------------------------------------
 
-    // Updates report time
+    // Calculates and updates the stored report time
     function updateReportingTime() {
         local now = time();
 
@@ -876,6 +915,8 @@ class MainController {
     }
 
     // Updates check-in time if needed, and returns time in sec to sleep for
+    // Optional parameter, a boolean, whether to offset check-in time based on 
+    // the time we have been awake
     function getSleepTimer(adjForTimeAwake = false) {
         local now = time();
         // Get stored wake time
@@ -892,7 +933,8 @@ class MainController {
         return sleepTime;
     }
 
-    // Debug logs about how long divice was awake, and puts device to sleep
+    // Helper that makes delays if Offline Assist message refresh request is not in 
+    // process, re-enables movement detection then puts the device to sleep
     function powerDown(enableMovementWake = true) {
         // Cancel max wake timer if it is still running
         cancelMaxWakeTimeout();
@@ -912,6 +954,8 @@ class MainController {
         sleep();
     }
 
+    // Helper that puts the device to sleep for the ammount of time determined by
+    // getSleepTimer helper
     function sleep() {
         // Log how long we have been awake
         local now = hardware.millis();
@@ -924,6 +968,8 @@ class MainController {
     // Timer Helpers
     // -------------------------------------------------------------
 
+    // Creates a timer that powers down GPS power after set time, parameters
+    // are the resolve and reject functions generated by a promise.
     function setLocTimeout(resolve, reject) {
         // Ensure only one timer is set
         cancelLocTimeout();
@@ -937,6 +983,7 @@ class MainController {
         }.bindenv(this));
     }
 
+    // Cancels the timer set by setLocTimeout helper
     function cancelLocTimeout() {
         if (gpsFixTimer != null) {
             imp.cancelwakeup(gpsFixTimer);
@@ -944,6 +991,7 @@ class MainController {
         }
     }
 
+    // Sets a timer that triggers powerDown after set time
     function setMaxWakeTimeout() {
         // Ensure only one timer is set
         cancelMaxWakeTimeout();
@@ -954,6 +1002,7 @@ class MainController {
         }.bindenv(this));
     }
 
+    // Cancels the timer set by setMaxWakeTimeout helper
     function cancelMaxWakeTimeout() {
         if (maxWakeTimer != null) {
             imp.cancelwakeup(maxWakeTimer);
@@ -964,12 +1013,14 @@ class MainController {
     // Helpers
     // -------------------------------------------------------------
 
+    // Returns boolean, if offline assist messages should be refreshed 
+    // based on the current time
     function shouldGetOfflineAssist() {
         local lastChecked = persist.getOfflineAssestChecked();
         return (lastChecked == null || time() >= (lastChecked + OFFLINE_ASSIST_REQ_MAX));
     }
 
-	// Overwrites currently stored wake and report times
+	// Sets the stored wake and report time values to the current time
     function overwriteStoredConnectSettings() {
         local now = time();
         persist.setWakeTime(now);
@@ -985,6 +1036,7 @@ class MainController {
         return (d.year >= VALID_TS_YEAR);
     }
 
+    // Returns a boolean if the GPS is powered up
     function areGettingLocation() {
         return (PWR_GATE_EN.read() == 1);
     }
