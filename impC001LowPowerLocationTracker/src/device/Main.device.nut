@@ -65,11 +65,8 @@ const CHECK_IN_TIME            = 60;
 // 86400 (one day) after testing completed if you wish to extend battery life
 const REPORT_TIME_SEC          = 1800 
 // NOTE: Maximum time to stay awake (Must be greater than LOCATION_TIMEOUT_SEC) if 
-// you wish to report location
-// To accommodate for immediate reporting of alerts, set this based on max location 
-// (LOCATION_TIMEOUT_SEC) and connect and report (~50s) times. If immediate reporting   
-// for alerts is not needed adjust this to location and reporting times (65-70s)
-const MAX_WAKE_TIME            = 120;
+// you wish to report location. Currently set to (LOCATION_TIMEOUT_SEC + MSG_ACK_TIMEOUT)
+const MAX_WAKE_TIME            = 70;
 
 // Maximum time to wait for GPS to get a fix, before trying to send report
 // NOTE: This should be less than the MAX_WAKE_TIME
@@ -498,9 +495,6 @@ class MainController {
         local batteryStatus = taskValues[3];
         local distance      = null; 
 
-        // Store/update alerts based on new env readings
-        checkForEnvAlerts(envReadings, batteryStatus);
-
         // Only calculate distance if we have moved
         if (persist.getMoveDetected()) distance = checkDistance(gpsFix);
 
@@ -520,8 +514,6 @@ class MainController {
         local envReadings     = taskValues[1];
         local batteryStatus   = taskValues[2];
         local accelReading    = (impactAlert != null) ? impactAlert.magnitude : null;
-        // Store/update alerts based on new env readings
-        local alertsUpdated   = checkForEnvAlerts(envReadings, batteryStatus);
 
         // Calculate if we have moved a significant distance
         local distance = checkDistance(gpsFix);
@@ -530,7 +522,7 @@ class MainController {
         local alerts = persist.getAlerts();
         local havePendingAlerts = AlertManager.checkForUnreported(alerts);
 
-        if (alertsUpdated || havePendingAlerts || distance != null) {
+        if (havePendingAlerts || distance != null) {
             ::debug("[Main] Have conditions to report...");
             // Send report
             local report = createReport(alerts, envReadings, batteryStatus, accelReading, gpsFix, distance);
@@ -552,8 +544,6 @@ class MainController {
         local envReadings   = taskValues[1];
         local accelReading  = taskValues[2];
         local batteryStatus = taskValues[3];
-        // Store/update alerts based on new env readings
-        local alertsUpdated = checkForEnvAlerts(envReadings, batteryStatus);
  
         // Only calculate distance if we have moved
         local distance = null;
@@ -563,7 +553,7 @@ class MainController {
         local alerts = persist.getAlerts();
         local havePendingAlerts = AlertManager.checkForUnreported(alerts);
 
-        if (alertsUpdated || havePendingAlerts || distance != null) {
+        if (havePendingAlerts || distance != null) {
             ::debug("[Main] Have conditions to report...");
             local report = createReport(alerts, envReadings, batteryStatus, accelReading, gpsFix, distance);
             sendReport(report);
@@ -582,14 +572,12 @@ class MainController {
         // Offline flow, check readings for alert conditions
         local envReadings   = taskValues[0];
         local batteryStatus = taskValues[1];
-        // Store/update alerts based on new env readings
-        local alertsUpdated = checkForEnvAlerts(envReadings, batteryStatus);
 
         // Check for unreported alerts
         local alerts = persist.getAlerts();
         local havePendingAlerts = AlertManager.checkForUnreported(alerts);
 
-        if (alertsUpdated || havePendingAlerts) {
+        if (havePendingAlerts) {
             ::debug("[Main] Have conditions to report...");
             local report = createReport(alerts, envReadings, batteryStatus);
             sendReport(report);
@@ -694,10 +682,12 @@ class MainController {
                         ::debug("[Main] Get temperature and humidity complete:")
                         ::debug(format("[Main] Current Humidity: %0.2f %s, Current Temperature: %0.2f °C", reading.humidity, "%", reading.temperature));
                         
-                        // TODO: check (should create alert, should update alert, should clear alert)
                         if (reading.tempAlert != ALERT_DESC.IN_RANGE)  ::debug("[Main] Temp reading not in range.");
                         if (reading.humidAlert != ALERT_DESC.IN_RANGE) ::debug("[Main] Humid reading not in range.");
                         ::debug("--------------------------------------------------------------------------");
+
+                        // Update alerts if needed, will start connecting if new alert condition is noted
+                        checkForEnvAlerts(reading);
                     }
 
                     return resolve(reading);
@@ -734,6 +724,9 @@ class MainController {
                 ::debug("[Main] Remaining cell capacity: " + status.capacity + "mAh");
                 ::debug("[Main] Percent of battery remaining: " + status.percent + "%");
                 ::debug("--------------------------------------------------------------------------");
+
+                // Update alerts if needed, will start connecting if new alert condition is noted
+                checkForBattAlerts(status);
                 return resolve(status);
             }.bindenv(this));
         }.bindenv(this))
@@ -749,20 +742,53 @@ class MainController {
         persist.storeAlerts(updated);
     }
 
-    // Helper that takes raw reading values, and checks if any of those readings is
-    // in/out of range (based on alert conditions), then updates the stored 
+    // Helper that takes raw env reading values, and checks if any of those readings 
+    // are in/out of range (based on alert conditions), then updates the stored 
     // alerts as needed, creating new alerts or resolving existing alerts 
-    function checkForEnvAlerts(envReadings, batteryStatus) {
+    function checkForEnvAlerts(envReadings) {
         local alerts = persist.getAlerts();
 
         // Make sure to check/update all alert types base on new readings
-        // TEMP_LOW, TEMP_HIGH, HUMID_LOW, HUMID_HIGH, BATTERY_LOW, SHOCK
+        // TEMP_LOW, TEMP_HIGH, HUMID_LOW, HUMID_HIGH
         local envAlertsUpdated  = AlertManager.checkEnvAlert(alerts, envReadings);
-        local battAlertsUpdated = AlertManager.checkBattAlert(alerts, batteryStatus);
 
-        if (envAlertsUpdated || battAlertsUpdated) {
+        if (envAlertsUpdated) {
             // Stored alerts have been updated, re-store 
             persist.storeAlerts(alerts);
+
+            // We have an alert to report, so start connecting if we aren't already
+            // NOTE: Calling connect if we are already connecting is ok, since  
+            // ConnectionManager library manages this condition
+            // Try to connect
+            cm.connect();
+
+            // Return true to trigger report send
+            return true;
+        }
+
+        return false;
+    }
+
+    // Helper that takes raw battery reading values, and checks if any of those readings 
+    // are in/out of range (based on alert conditions), then updates the stored 
+    // alerts as needed, creating new alerts or resolving existing alerts 
+    function checkForBattAlerts(batteryStatus) {
+        local alerts = persist.getAlerts();
+
+        // Make sure to check/update all alert types base on new readings
+        // BATTERY_LOW
+        local battAlertsUpdated = AlertManager.checkBattAlert(alerts, batteryStatus);
+
+        if (battAlertsUpdated) {
+            // Stored alerts have been updated, re-store 
+            persist.storeAlerts(alerts);
+
+            // We have an alert to report, so start connecting if we aren't already
+            // NOTE: Calling connect if we are already connecting is ok, since  
+            // ConnectionManager library manages this condition
+            // Try to connect
+            cm.connect();
+
             // Return true to trigger report send
             return true;
         }
@@ -783,6 +809,13 @@ class MainController {
 
         // Update stored alerts with shock event
         persist.storeAlerts(alerts);
+
+        // We have an alert to report, so start connecting if we aren't already
+        // NOTE: Calling connect if we are already connecting is ok, since  
+        // ConnectionManager library manages this condition
+        // Try to connect
+        cm.connect();
+
         return impactAlert;
     }
 
