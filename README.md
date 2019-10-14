@@ -2,15 +2,17 @@
 
 This repository contains examples of low power asset tracking applications. 
 
-## [UltraLowPowerTracker](./UltraLowPowerTracker) ##
+## [impC001 UltraLowPowerTracker](./impC001UltraLowPowerTracker) ##
 
 This example provides software to drive a low-power cellular asset tracker. The tracker monitors for movement; if movement is detected, the tracker will report daily, otherwise the device will report once a week sending GPS location, battery status and movement status.
 
-## [LowPowerLocationTracker](./LowPowerLocationTracker) ##
+## [impC001 LowPowerLocationTracker](./impC001LowPowerLocationTracker) ##
 
-This example provides software to drive a low-power cellular asset tracker. The tracker monitors temperature, humidity and battery. If any readings are out of range a report will be generated and sent to the cloud immediately. The tracker also monitors movement. When movement is detected, the tracker will check if the location has changed, and if so then report the new location. If no out of range readings or location changes are detected the tracker will generate a report daily.
+This example provides software to drive a low-power cellular asset tracker. The tracker monitors movement, impact events, temperature, humidity, and battery status. When movement is detected, the tracker will check for an impact event or if the location has changed, and if so then generate a report. The tracker also wakes periodically to take readings. If any readings are determined to be out of range a report will be generated and sent to the cloud. If no out of range readings or location changes are detected the tracker will generate a report based on the application's reporting interval. 
 
-## Common Configuration ##
+This example also has two additional web service integrations. The cloud service class has been used to integrate with Losant. And in the event that the device cannot obtain a GPS fix, it will use the device's cell info to obtain a location using the Google Maps API.
+
+## impC001 Common Configuration ##
 
 All examples share a common set-up, but run different application code. Follow these steps to configure the tracking application of your choice.
 
@@ -43,6 +45,21 @@ Update settings/imp.config "device_code", "agent_code", and "builderSettings" to
     "builderSettings": {
         "variable_definitions": {
             "UBLOX_ASSISTNOW_TOKEN" : "<YOUR-UBLOX-ASSIST-NOW-TOKEN-HERE>"
+        }
+    }
+```
+
+For the *LowPowerLocationTracker* add additional api keys for Losant and Google Maps to the builderSettings variable_definitions: 
+
+```
+    "device_code": "src/device/Main.device.nut"
+    "agent_code": "src/agent/Main.agent.nut"
+    "builderSettings": {
+        "variable_definitions": {
+            "UBLOX_ASSISTNOW_TOKEN" : "<YOUR-UBLOX-ASSIST-NOW-TOKEN-HERE>", 
+            "GOOGLE_MAPS_API_KEY" : "<YOUR-GOOGLE-MAPS-API-KEY-HERE>",
+            "LOSANT_APPLICATION_ID" : "<YOUR-LOSANT-APPLICATION-ID-HERE>",
+            "LOSANT_DEVICE_API_TOKEN" : "<YOUR-LOSANT-DEVICE-API-TOKEN-HERE>"
         }
     }
 ```

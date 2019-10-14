@@ -57,14 +57,18 @@
 // Main Application
 // -----------------------------------------------------------------------
 
-// Wake every x seconds to check sensors for alert conditions (sleep time is base on this)
+// Wake every x seconds to check sensors for alert conditions. Sleep time 
+// is base on this interval. If you wish to extend battery life adjust to 
+// a longer interval
 const CHECK_IN_TIME            = 60;
-// Send a report, regaurdless of check/alert conditions
-const REPORT_TIME_SEC          = 1800 // changed back to 86400 after testing completed
-// Maximum time to stay awake (Must be greater than LOCATION_TIMEOUT_SEC) if you wish to 
-// report location
-// Currently set to get location (60s) and then connect and report (50s) if alert 
-// is noted before 
+// Send a report, regaurdless of check/alert conditions. Update the this to 
+// 86400 (one day) after testing completed if you wish to extend battery life
+const REPORT_TIME_SEC          = 1800 
+// NOTE: Maximum time to stay awake (Must be greater than LOCATION_TIMEOUT_SEC) if 
+// you wish to report location
+// To accommodate for immediate reporting of alerts, set this based on max location 
+// (LOCATION_TIMEOUT_SEC) and connect and report (~50s) times. If immediate reporting   
+// for alerts is not needed adjust this to location and reporting times (65-70s)
 const MAX_WAKE_TIME            = 120;
 
 // Maximum time to wait for GPS to get a fix, before trying to send report
