@@ -26,9 +26,7 @@
 
 // Libraries 
 #require "Messenger.lib.nut:0.1.0"
-#require "UBloxAssistNow.agent.lib.nut:1.0.0"
-#require "GoogleMaps.agent.lib.nut:1.0.1" 
-#require "Losant.agent.lib.nut:1.0.0"
+// TODO: ADD YOUR CLOUD SERVICE LIBRARY HERE
 
 // Supporting files
 @include __PATH__ + "/../shared/Logger.shared.nut"
@@ -41,7 +39,7 @@
 // -----------------------------------------------------------------------
 
 // Max time to wait for agent/device message ack
-const MSG_ACK_TIMEOUT          = 10;
+const MSG_ACK_TIMEOUT = 10;
 
 class MainController {
     
@@ -78,14 +76,6 @@ class MainController {
         local ack = customAck();
         ack();
 
-        // Add alert description
-        if ("alerts" in report) {
-            local alerts    = report.alerts;
-            foreach(idx, alert in alerts) {
-                alerts[idx]["description"] <- getAlertTypeDescription(alert.type);
-            }
-        }
-
         if (!("fix" in report) && "cellInfo" in report) {
             // Use cell info from device to get location from 
             // Google maps API
@@ -114,49 +104,17 @@ class MainController {
     function getAssist(payload, customAck) {
         local reply = customAck();
 
-        switch (payload.data) {
-            case ASSIST_TYPE.OFFLINE:
-                ::debug("[Main] Requesting offline assist messages from u-blox webservice");
-                loc.getOfflineAssist(function(assistMsgs) {
-                    ::debug("[Main] Received online assist messages from u-blox webservice");
-                    if (assistMsgs != null) {
-                        ::debug("[Main] Sending device offline assist messages");
-                        reply(assistMsgs);
-                    }
-                }.bindenv(this))
-                break;
-            case ASSIST_TYPE.ONLINE:
-                ::debug("[Main] Requesting online assist messages from u-blox webservice");
-                loc.getOnlineAssist(function(assistMsgs) {
-                    ::debug("[Main] Received online assist messages from u-blox webservice");
-                    if (assistMsgs != null) {
-                        ::debug("[Main] Sending device online assist messages");
-                        reply(assistMsgs);
-                    }
-                }.bindenv(this))
-                break;
-            default: 
-                ::error("[Main] Unknown assist request from device: " + payload.data);
-        }
-    }
-
-    function getFixDescription(fixType) {
-        switch(fixType) {
-            case 0:
-                return "no fix";
-            case 1:
-                return "dead reckoning only";
-            case 2:
-                return "2D fix";
-            case 3:
-                return "3D fix";
-            case 4:
-                return "GNSS plus dead reckoning combined";
-            case 5:
-                return "time-only fix";
-            default: 
-                return "unknown";
-        }
+        ::debug("[Main] Requesting offline assist messages from u-blox webservice");
+        loc.getAssistBinary(function(assistBinary) {
+            ::debug("[Main] Received online assist messages from u-blox webservice");
+            if (assistBinary != null) {
+                ::debug("[Main] Sending device assist binary file");
+                reply(assistBinary);
+            } else {
+                ::debug("[Main] Failed to get assist binary. Sending empty reply to device");
+                reply();
+            }
+        }.bindenv(this))
     }
 
     function printReportData(report) {
@@ -203,23 +161,6 @@ class MainController {
         }
 
         if ("movement" in report) ::debug("[Main] Movement detected: " + report.movement);
-        if ("alerts" in report) {
-            local alerts    = report.alerts;
-            local numAlerts = alerts.len();
-            if (numAlerts > 0) {
-                ::debug("[Main] " + numAlerts + " alerts detected:");
-                foreach(idx, alert in alerts) {
-                    ::debug("[Main] Alert " + idx + " details:");
-                    ::debug("[Main]   Alert type: " + alert.type);
-                    ::debug("[Main]   Alert description: " + alert.description);
-                    ::debug("[Main]   Alert trigger: " + alert.trigger);
-                    ::debug("[Main]   Alert created at: " + formatDate(alert.created));
-                    if (alert.resolved != 0) ::debug("[Main]   Alert condition resolved at: " + formatDate(alert.resolved));
-                    ::debug("[Main] Raw alert table: ");
-                    ::debug(http.jsonencode(alert));
-                }
-            }
-        }
         ::debug("--------------------------------------------------------------");
     }
 
@@ -228,20 +169,22 @@ class MainController {
         return format("%04d-%02d-%02d %02d:%02d:%02d", d.year, (d.month+1), d.day, d.hour, d.min, d.sec);
     }
 
-    function getAlertTypeDescription(type) {
-        switch(type) {
-            case ALERT_TYPE.TEMP_LOW: 
-                return "Temperature out of range: LOW";
-            case ALERT_TYPE.TEMP_HIGH: 
-                return "Temperature out of range: HIGH";
-            case ALERT_TYPE.HUMID_LOW: 
-                return "Humidity out of range: LOW";
-            case ALERT_TYPE.HUMID_HIGH: 
-                return "Humidity out of range: HIGH";
-            case ALERT_TYPE.BATTERY_LOW: 
-                return "Battery running low";
-            case ALERT_TYPE.SHOCK: 
-                return "Shock detected";
+    function getFixDescription(fixType) {
+        switch(fixType) {
+            case 0:
+                return "no fix";
+            case 1:
+                return "dead reckoning only";
+            case 2:
+                return "2D fix";
+            case 3:
+                return "3D fix";
+            case 4:
+                return "GNSS plus dead reckoning combined";
+            case 5:
+                return "time-only fix";
+            default: 
+                return "unknown";
         }
     }
 
