@@ -57,13 +57,13 @@ class Location {
             local assistBinary = null;
 
             if (resp.statuscode == 200) {
-                ::debug("Received gpsOneXTRA Assist Binary. Data length: " + resp.body.len());
+                ::debug("[Location] Received gpsOneXTRA Assist Binary. Data length: " + resp.body.len());
                 assistBinary = resp.body;
             } else {
-                ::error("Error retrieving gpsOneXTRA Assist Binary, http status code: " + resp.statuscode);
+                ::error("[Location] Error retrieving gpsOneXTRA Assist Binary, http status code: " + resp.statuscode);
             } 
             // Pass response or null to callback
-            onResp(assisassistBinarytData);     
+            onResp(assistBinary);     
         }.bindenv(this))
     }
 

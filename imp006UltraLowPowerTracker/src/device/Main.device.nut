@@ -97,6 +97,7 @@ class MainController {
     // Application Variables
     bootTime      = null;
     maxWakeTimer  = null;
+    gpsFixTimer   = null;
 
     // Flags 
     gettingAssist = null;
@@ -437,10 +438,11 @@ class MainController {
     function getLocation() {
         return Promise(function(resolve, reject) {
             if (loc == null) loc = Location(bootTime);
+            setLocTimeout();
             loc.getLocation(LOCATION_ACCURACY, function(gpsFix) {
-                // TODO: Power down GPS, check fix accuracy/timeout?
                 ::debug("[Main] GPS finished location request...");
-                resolve(gpsFix);
+                cancelLocTimeout();
+                ("error" in gpsFix) ? resolve(null) : resolve(gpsFix);
             }.bindenv(this));
         }.bindenv(this));
     }
@@ -449,7 +451,6 @@ class MainController {
     // -------------------------------------------------------------
     
     function onAssistMsgDone() {
-        // TODO: update this function once it is known what is needed
         ::debug("[Main] Assist messages written to GPS completed.");
         // Assist binary stored, toggle flag that lets device know it is ok to sleep
         gettingAssist = false;
@@ -643,6 +644,25 @@ class MainController {
     // Timer Helpers
     // -------------------------------------------------------------
 
+    // Creates a timer that powers down GPS power after set time
+    function setLocTimeout() {
+        // Ensure only one timer is set
+        cancelLocTimeout();
+        // Start a timer to send report if no GPS fix is found
+        gpsFixTimer = imp.wakeup(LOCATION_TIMEOUT_SEC, function() {
+            ::debug("[Main] GPS failed to get an accurate fix. Disabling GPS power.");
+            loc.disableGNSS();
+        }.bindenv(this));
+    }
+
+    // Cancels the timer set by setLocTimeout helper
+    function cancelLocTimeout() {
+        if (gpsFixTimer != null) {
+            imp.cancelwakeup(gpsFixTimer);
+            gpsFixTimer = null;
+        }
+    }
+
     // Sets a timer that triggers powerDown after set time
     function setMaxWakeTimeout() {
         // Ensure only one timer is set
@@ -677,24 +697,21 @@ class MainController {
     }
 
     function shouldGetAssist() {
-        // return boolean
-        // TODO: check if GPS binary is expired
-        return false;
+        if (loc == null) loc = Location(bootTime);
+        return !loc.assistIsValid();
     }
 
     // Returns boolean, checks for event(s) or if report time has passed
     function shouldConnect() {
         // Check for events
-        // Note: We are not currently storing position changes. The assumption
-        // is that if we change position then movement will be detected and trigger
-        // a report to be generated.
-        local haveMoved = (persist.getAlert(ALERT_TYPE.MOVEMENT) == ALERT_TYPE.MOVEMENT);
-        ::debug("[Main] Movement detected: " + haveMoved);
-        if (haveMoved) return true;
 
         // Note: We are not storing triggering conditions, just an integer 
-        // that identifies the alert condition
-        // TODO: UPDATE TO CHECK ALERTS
+        // that identifies the alert condition, movement, temp, humid, battery
+        local alerts = persist.getAlerts();
+        if (alerts != ALERT_TYPE.NONE) {
+            ::debug(format("[Main] Alerts detected: 0x%02X", alerts));
+            return true;
+        }
 
         // Note: We need a valid timestamp to determine sleep times.
         // If the imp looses all power, a connection to the server is
