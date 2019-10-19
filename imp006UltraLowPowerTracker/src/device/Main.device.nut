@@ -62,12 +62,9 @@ const MAX_WAKE_TIME            = 70;
 
 // Maximum time to wait for GPS to get a fix, before trying to send report
 // NOTE: This should be less than the MAX_WAKE_TIME
-const GPS_TIMEOUT              = 55;
+const LOCATION_TIMEOUT_SEC     = 55;
 // Accuracy of GPS fix in meters
 const LOCATION_ACCURACY        = 10;
-// Accuracy of GPS fix in meters. If fix did not meet LOCATION_ACCURACY, but did
-// meet LOCATION_REPORT_ACCURACY, add it to report anyway.
-const LOCATION_REPORT_ACCURACY = 15;
 
 // Force in Gs that will trigger movement interrupt
 const MOVEMENT_THRESHOLD       = 0.05;
@@ -523,7 +520,10 @@ class MainController {
         }
 
         if (battStatus != null)   report.battStatus <- battStatus;
-        if (accelReading != null) report.magnitude  <- accelReading;
+        if (accelReading != null) {
+            report.accel     <- accelReading;
+            report.magnitude <- accelReading.mag;
+        }
         if (alerts != null)       report.alerts     <- alerts;
 
         if (envReadings != null) {
@@ -613,7 +613,7 @@ class MainController {
 
         // Our timer has expired, update it to next interval
         if (wakeTime == null || now >= wakeTime) {
-            wakeTime = (adjForTimeAwake) ? (now + CHECK_IN_TIME - (bootTime / 1000)) : (now + CHECK_IN_TIME);
+            wakeTime = (adjForTimeAwake) ? (now + CHECK_IN_TIME_SEC - (bootTime / 1000)) : (now + CHECK_IN_TIME_SEC);
             persist.setWakeTime(wakeTime);
         }
 

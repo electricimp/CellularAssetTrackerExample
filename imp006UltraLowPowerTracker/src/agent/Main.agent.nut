@@ -26,6 +26,7 @@
 
 // Libraries 
 #require "Messenger.lib.nut:0.1.0"
+#require "GoogleMaps.agent.lib.nut:1.0.1" 
 // TODO: ADD YOUR CLOUD SERVICE LIBRARY HERE
 
 // Supporting files
@@ -80,19 +81,21 @@ class MainController {
             // Use cell info from device to get location from 
             // Google maps API
             local cellStatus = loc.parseCellInfo(report.cellInfo);
-            loc.getLocCellInfo(cellStatus, function(location) {
-                if (location != null) {
-                    report.cellInfoLoc <- location;
-                }
+            if ("cellid" in cellStatus) {
+                loc.getLocCellInfo(cellStatus, function(location) {
+                    if (location != null) {
+                        report.cellInfoLoc <- location;
+                    }
 
-                // Log status report from device
-                printReportData(report);
-                // Send device data to cloud service
-                cloud.send(report);
-            }.bindenv(this));
-            
-            // Let cell location response trigger report send to cloud 
-            return;
+                    // Log status report from device
+                    printReportData(report);
+                    // Send device data to cloud service
+                    cloud.send(report);
+                }.bindenv(this));
+                
+                // Let cell location response trigger report send to cloud 
+                return;
+            }
         } 
 
         // Log status report from device
@@ -127,9 +130,10 @@ class MainController {
         if ("secSinceBoot" in report) ::debug("[Main] Report sent " + report.secSinceBoot + "s after device booted");
 
         ::debug("[Main] Telemetry details: ");
-        if ("magnitude" in report)   ::debug("[Main]   Magnitude: "   + report.magnitude   + " Gs");
-        if ("temperature" in report) ::debug("[Main]   Temperature: " + report.temperature + "°C");
-        if ("humidity" in report)    ::debug("[Main]   Humidity: "    + report.humidity    + "%");
+        if ("magnitude" in report)   ::debug("[Main]   Magnitude: "     + report.magnitude   + " Gs");
+        if ("accel" in report)       ::debug("[Main]   Accelerometer: " + http.jsonencode(report.accel));
+        if ("temperature" in report) ::debug("[Main]   Temperature: "   + report.temperature + "°C");
+        if ("humidity" in report)    ::debug("[Main]   Humidity: "      + report.humidity    + "%");
 
         
         if ("battStatus" in report) { 

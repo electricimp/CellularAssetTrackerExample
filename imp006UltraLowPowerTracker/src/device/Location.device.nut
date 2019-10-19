@@ -146,7 +146,7 @@ class Location {
     function writeAssistMsgs(msgs, onDone = null) {
         // Cannot do this with AT Command quirk!! Just trigger callback
         onDone();
-        
+
         // Here is the list of commands from example code:
         // Enable one xtra
             // AT_COMMAND.ENABLE_GPS_ONE_XTRA 
@@ -252,23 +252,22 @@ class Location {
 
     // Note: This blocks until the response is returned
     function _writeATCommand(cmd) {
-        return imp.setquirk(0x75636feb, command);
+        return imp.setquirk(0x75636feb, cmd);
     }
 
     // Takes AT response and looks for OK, error and response data 
     // returns table that may contain slots: raw, error, data, success
     function _parseATResp(resp) {
+        local parsed = {"raw" : resp};
+
         try {
             // ::debug("[Location] AT response: " + resp);
             // ::debug("[Location] AT response len: " + resp.len());
 
-            local parsed = {
-                "raw"     : resp,
-                "success" : (resp.find("OK") != null)
-            };
+            parsed.success <- (resp.find("OK") != null);
             
             local start = resp.find(":");
-            (start != null) ? start+=2 : 0;
+            (start != null) ? start+=2 : start = 0;
             
             local newLine = resp.find("\n");
             local end = (newLine != null) ? newLine : resp.len();
@@ -280,11 +279,11 @@ class Location {
             } else {
                 parsed.data  <- data;
             }
-            
-            return parsed;
         } catch(e) {
             parsed.error <- "Error parsing AT response: " + e;
         }
+
+        return parsed;
     }
 
     function _parseLocData(data, formatLL = true) {
@@ -317,6 +316,13 @@ class Location {
                 degMin.slice(0, (idx - 2)) + "." + 
                 degMin.slice((idx - 2), idx) + 
                 degMin.slice(idx + 1);
+    }
+
+    function _logResp(resp) {
+        ::debug("[Location] Parsed AT response:");
+        foreach(k, v in resp) {
+            ::debug("[Location]   " + k + ": " + v);
+        }
     }
 
 }

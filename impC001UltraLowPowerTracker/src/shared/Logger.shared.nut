@@ -26,11 +26,12 @@
 
 // Confiure Logging UART on device
 const LOGGING_UART_BAUD_RATE = 115200;
+uartLoggingConfigured <- false;
 if ("LOGGING_UART" in getroottable()) {
     // Configure logging UART
     LOGGING_UART.configure(LOGGING_UART_BAUD_RATE, 8, PARITY_NONE, 1, NO_CTSRTS);
     // Flag used to determine if UART logging is configured
-    uartLoggingConfigured <- true;
+    uartLoggingConfigured = true;
 }
 
 enum LOG_LEVEL {

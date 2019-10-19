@@ -219,7 +219,8 @@ class Location {
                     throw "Unrecognized type " + str[0];
             }    
         } catch(e) {
-            ::error("[Location] Parsing error: " + e);
+            ::error("[Location] Error parsing cell info: " + e);
+            ::debug("[Location] Cell info: " + cellInfo);
         }
         
         return status;
