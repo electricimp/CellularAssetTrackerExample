@@ -54,15 +54,25 @@
 // -----------------------------------------------------------------------
 
 // Wake every x seconds to check if report should be sent
-const CHECK_IN_TIME_SEC        = 86400; // 60s * 60m * 24h
+// When in production, for long battery life use something 
+// like checkin daily: 86400 = 60s * 60m * 24h
+const CHECK_IN_TIME_SEC        = 60; 
 // Wake every x seconds to send a report, regaurdless of check results
-const REPORT_TIME_SEC          = 604800; // 60s * 60m * 24h * 7d
+// When in production, for long battery life use something 
+// like report weekly: 604800 = 60s * 60m * 24h * 7d
+const REPORT_TIME_SEC          = 1800;
 // Maximum time to stay awake
-const MAX_WAKE_TIME            = 70;
+const MAX_WAKE_TIME            = 90;
+// PATCH: If GPS assist is not enabled, give more time for first fix after 
+// device boots
+const MAX_FIRST_WAKE_TIME      = 190;
 
 // Maximum time to wait for GPS to get a fix, before trying to send report
 // NOTE: This should be less than the MAX_WAKE_TIME
-const LOCATION_TIMEOUT_SEC     = 55;
+const LOCATION_TIMEOUT_SEC     = 85;
+// PATCH: If GPS assist is not enabled, give more time for first fix after 
+// device boots
+const FIRST_LOC_TIMEOUT_SEC    = 180;
 // Accuracy of GPS fix in meters
 const LOCATION_ACCURACY        = 10;
 
@@ -97,7 +107,8 @@ class MainController {
     gpsFixTimer   = null;
 
     // Flags 
-    gettingAssist = null;
+    gettingAssist  = null;
+    longerTimeouts = null;
 
     constructor() {
         // Get boot timestamp
@@ -147,6 +158,9 @@ class MainController {
         msgr = Messenger({"ackTimeout" : MSG_ACK_TIMEOUT});
         msgr.onFail(msgrOnFail.bindenv(this));
         msgr.onAck(msgrOnAck.bindenv(this));
+
+        // Use longer fix/max wake timeouts
+        longerTimeouts = false;
     }
 
     // Msgr handlers
@@ -224,11 +238,16 @@ class MainController {
             persist.setAlert(ALERT_TYPE.MOVEMENT, false);
         }
 
-        // All other alerts should wait until next reading clears them.
-        // Report reading values are not persisted, and will be cleared when we sleep
+        // All other alerts remain asserted until condition clears.
+        // TODO: Track alerts/alert reporting
 
-        // NOTE: Reporting is scheduled based purely on REPORT_TIME_SEC, if an alert triggered
-        // this report the next report will be scheduled REPORT_TIME_SEC from now
+        // NOTE: Report values are not persisted, and will be unretrievable when 
+        // this function returns
+
+        // NOTE: Reporting is scheduled based purely on REPORT_TIME_SEC, therefore 
+        // if an alert triggered a report not the report timer expiring the next 
+        // report will be scheduled REPORT_TIME_SEC from now, not when the original 
+        // report time is set to expire
         updateReportingTime();
         powerDown();
     }
@@ -258,6 +277,10 @@ class MainController {
     // Wake up (not on interrupt or timer) flow
     function onBoot(wakereson) {
         ::debug("[Main] Wake reason: " + lpm.wakeReasonDesc());
+
+        // Use longer timeouts for first fix if we are not using 
+        // assist data
+        longerTimeouts = true;
 
         // Set a limit on how long we are awake for, sets a timer that triggers 
         // powerDown/sleep
@@ -496,6 +519,10 @@ class MainController {
         local alerts = persist.getAlerts();
         if (alerts != ALERT_TYPE.NONE ) {
             ::debug("[Main] Have conditions to report...");
+
+            // TODO: Track alerts (don't re-send temp/humid/batt alerts)
+            // TODO: Add location to report (this may require staying awake longer)
+
             // Send report
             local report = createReport(alerts, envReadings, batteryStatus);
             sendReport(report);
@@ -531,9 +558,9 @@ class MainController {
             report.humidity    <- envReadings.humidity;
         }
 
-        if (gpsFix != null) {
+        if (gpsFix != null && !("accuracy" in gpsFix)) {
             report.fix <- gpsFix;
-            report.fix.accuracy <- "Under " + LOCATION_ACCURACY + " meters";
+            report.fix.accuracy <- "< " + LOCATION_ACCURACY;
         }
 
         return report;
@@ -640,8 +667,10 @@ class MainController {
     function setLocTimeout() {
         // Ensure only one timer is set
         cancelLocTimeout();
+        // Adjust to longer timeout if getting first fix
+        local sec = (longerTimeouts) ? FIRST_LOC_TIMEOUT_SEC : LOCATION_TIMEOUT_SEC;
         // Start a timer to send report if no GPS fix is found
-        gpsFixTimer = imp.wakeup(LOCATION_TIMEOUT_SEC, function() {
+        gpsFixTimer = imp.wakeup(sec, function() {
             ::debug("[Main] GPS failed to get an accurate fix. Disabling GPS power.");
             loc.disableGNSS();
         }.bindenv(this));
@@ -659,8 +688,10 @@ class MainController {
     function setMaxWakeTimeout() {
         // Ensure only one timer is set
         cancelMaxWakeTimeout();
+        // Adjust to longer timeout if getting first fix
+        local sec = (longerTimeouts) ? MAX_FIRST_WAKE_TIME : MAX_WAKE_TIME;
         // Start a timer to power down after we have been awake for set time
-        maxWakeTimer = imp.wakeup(MAX_WAKE_TIME, function() {
+        maxWakeTimer = imp.wakeup(sec, function() {
             ::debug("[Main] Wake timer expired. Triggering power down...");
             powerDown();
         }.bindenv(this));
@@ -702,6 +733,7 @@ class MainController {
         local alerts = persist.getAlerts();
         if (alerts != ALERT_TYPE.NONE) {
             ::debug(format("[Main] Alerts detected: 0x%02X", alerts));
+            // TODO: Track alerts (don't re-send temp/humid/batt alerts)
             return true;
         }
 

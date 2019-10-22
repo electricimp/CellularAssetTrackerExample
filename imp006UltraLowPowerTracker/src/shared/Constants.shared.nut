@@ -36,3 +36,11 @@ enum ALERT_TYPE {
     TEMP_HIGH  = 0x04,
     HUMID_HIGH = 0x08
 }
+
+// Alert Type Reported
+enum ALERT_TYPE_REPORTED {
+    MOVEMENT   = 0x10,
+    BATT_LOW   = 0x20,
+    TEMP_HIGH  = 0x40,
+    HUMID_HIGH = 0x80
+}

@@ -39,7 +39,7 @@ class Env {
     // Takes a reading and passes result to callback 
     function getTempHumid(cb) {
         th.setMode(HTS221_MODE.ONE_SHOT);
-        // Trigger callback only if we get a reading.
+        // Trigger callback when we get a reading.
         th.read(function(res) {
             if ("error" in res) {
                 ::error("[Env] Temperature/Humidity reading error: " + res.error);

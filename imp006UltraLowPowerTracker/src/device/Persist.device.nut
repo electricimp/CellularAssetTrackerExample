@@ -190,12 +190,4 @@ class Persist {
         return b;
     }
 
-    function _serializeBool(detected) {
-        local b = blob(1);
-        local int = (detected) ? 1 : 0;
-        b.writen(int, 'b');
-        b.seek(0, 'b');
-        return b;
-    }
-
 }

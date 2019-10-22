@@ -147,7 +147,7 @@ class MainController {
             local fix = report.fix;
             ::debug("[Main] Location fix details: ");
             ::debug("[Main]   Fix time " + fix.time);
-            ::debug("[Main]   Seconds to first fix: " + fix.secTo1stFix);
+            if ("secTo1stFix" in fix) ::debug("[Main]   Seconds to first fix: " + fix.secTo1stFix);
             ::debug("[Main]   Seconds to accurate fix: " + fix.secToFix);
             ::debug("[Main]   Fix type: " + getFixDescription(fix.fixType));
             ::debug("[Main]   Fix accuracy: " + fix.accuracy + " meters");
@@ -174,6 +174,13 @@ class MainController {
     }
 
     function getFixDescription(fixType) {
+        if (typeof fixType == "string") {
+            try {
+                fixType = fixType.tointeger();
+            } catch(e) {
+                return "unknown";
+            }
+        }
         switch(fixType) {
             case 0:
                 return "no fix";

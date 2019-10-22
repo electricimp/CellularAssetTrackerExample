@@ -241,7 +241,7 @@ class Location {
         }
 
         local fix = _parseLocData(resp.data);
-        fix.timeTilFirstFix <- (hardware.millis() - bootTime) / 1000.0;
+        fix.secToFix <- (hardware.millis() - bootTime) / 1000.0;
         return fix;
     }
 
@@ -287,20 +287,22 @@ class Location {
     }
 
     function _parseLocData(data, formatLL = true) {
+        // ::debug("[Location] Parsing location data: " + data);
         try {
             local parsed = split(data, ",");
             return {
-                "checkTime" : parsed[0],
-                "lat"       : (formatLL) ? _formatLatLon(parsed[1], parsed[2]) : parsed[2] + parsed[1],
-                "lon"       : (formatLL) ? _formatLatLon(parsed[3], parsed[4]) : parsed[4] + parsed[3],
-                "hdop"      : parsed[5],
-                "alt"       : parsed[6],
-                "fixType"   : parsed[7],
-                "cog"       : parsed[8],
-                "spkm"      : parsed[9],
-                "spkn"      : parsed[10],
-                "fixTime"   : parsed[11],
-                "numSats"   : parsed[12]
+                "time"       : _formatTimeStamp(parsed[11], parsed[0]),
+                "utc"        : parsed[0],
+                "lat"        : (formatLL) ? _formatLatLon(parsed[1], parsed[2]) : parsed[1] + parsed[2],
+                "lon"        : (formatLL) ? _formatLatLon(parsed[3], parsed[4]) : parsed[3] + parsed[4],
+                "hdop"       : parsed[5],
+                "alt"        : parsed[6],
+                "fixType"    : parsed[7],
+                "cog"        : parsed[8],
+                "spkm"       : parsed[9],
+                "spkn"       : parsed[10],
+                "date"       : parsed[11],
+                "numSats"    : parsed[12]
             }
         } catch(e) {
             return {
@@ -309,13 +311,25 @@ class Location {
         }
     }
 
+    // Format GPS timestamp
+    function _formatTimeStamp(d, utc) {
+        // Input d: DDMMYY, utc HHMMSS.S
+        // Formated result: YYYY-MM-DD HH:MM:SS.SZ
+        return format("20%s-%s-%s %s:%s:%sZ", d.slice(4), 
+                                              d.slice(2, 4), 
+                                              d.slice(0, 2), 
+                                              utc.slice(0, 2), 
+                                              utc.slice(2, 4), 
+                                              utc.slice(4));
+    }
+
     // Format to decimal degrees
     function _formatLatLon(degMin, dir) {
         local idx = degMin.find(".");
-        return (dir == "S" || dir == "W") ? "-" : "" + 
-                degMin.slice(0, (idx - 2)) + "." + 
-                degMin.slice((idx - 2), idx) + 
-                degMin.slice(idx + 1);
+        return ((dir == "S" || dir == "W") ? "-" : "") +
+                 degMin.slice(0, (idx - 2)) + "." +
+                 degMin.slice((idx - 2), idx) +
+                 degMin.slice(idx + 1);
     }
 
     function _logResp(resp) {
