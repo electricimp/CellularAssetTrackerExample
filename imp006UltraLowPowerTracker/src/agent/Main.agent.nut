@@ -107,9 +107,9 @@ class MainController {
     function getAssist(payload, customAck) {
         local reply = customAck();
 
-        ::debug("[Main] Requesting offline assist messages from u-blox webservice");
+        ::debug("[Main] Requesting offline assist messages from webservice");
         loc.getAssistBinary(function(assistBinary) {
-            ::debug("[Main] Received online assist messages from u-blox webservice");
+            ::debug("[Main] Received online assist messages from webservice");
             if (assistBinary != null) {
                 ::debug("[Main] Sending device assist binary file");
                 reply(assistBinary);

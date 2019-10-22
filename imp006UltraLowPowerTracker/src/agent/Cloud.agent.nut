@@ -24,7 +24,7 @@
 
  // Cloud Service File 
 
- // Manages Cloud Service Communications  
+// Manages Cloud Service Communications  
 // Dependencies: YOUR CLOUD SERVICE LIBRARY 
 // Initializes: YOUR CLOUD SERVICE LIBRARY
 class Cloud {

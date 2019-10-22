@@ -45,10 +45,10 @@ const GPS_ONE_XTRA3_URL_6 = "http://xtrapath3.izatcloud.net/xtra3grc.bin";
 // Initializes: Google Maps Library Library
 class Location {
     
-    gmaps  = null;
+    gmaps = null;
 
     constructor() {
-        gmaps  = GoogleMaps(GOOGLE_MAPS_API_KEY);
+        gmaps = GoogleMaps(GOOGLE_MAPS_API_KEY);
     }
 
     function getAssistBinary(onResp) {
