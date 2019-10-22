@@ -27,7 +27,7 @@
 enum PERSIST_FILE_NAMES {
     WAKE_TIME     = "wake", 
     REPORT_TIME   = "report",
-    MOVE_DETECTED = "move"
+    ALERTS        = "alerts"
 }
 
 // Manages Persistant Storage  
@@ -37,9 +37,9 @@ class Persist {
 
     _sffs      = null;
 
-    reportTime   = null;
-    wakeTime     = null;
-    moveDetected = null;
+    reportTime = null;
+    wakeTime   = null;
+    alerts     = null;
 
     constructor() {
         // TODO: Update with more optimized circular buffer.
@@ -67,6 +67,24 @@ class Persist {
         return wakeTime;
     }
 
+    function setWakeTime(newTime) {
+        // Only update if timestamp has changed
+        if (wakeTime == newTime) return false;
+
+        // Erase outdated wake time
+        if (_sffs.fileExists(PERSIST_FILE_NAMES.WAKE_TIME)) {
+            _sffs.eraseFile(PERSIST_FILE_NAMES.WAKE_TIME)
+        }
+
+        // Update local and stored wake time with the new time
+        wakeTime = newTime;
+        local file = _sffs.open(PERSIST_FILE_NAMES.WAKE_TIME, "w");
+        file.write(_serializeTimestamp(wakeTime));
+        file.close();
+        ::debug("[Persist] Wake time stored: " + wakeTime);
+        return true;
+    }
+
     function getReportTime() {
         // If we have a local copy, return the local copy
         if (reportTime != null) return reportTime;
@@ -84,62 +102,9 @@ class Persist {
         return reportTime;;
     }
 
-    function getMoveDetected() {
-        // If we have a local copy, return the local copy
-        if (moveDetected != null) return moveDetected;
-        
-        if (_sffs.fileExists(PERSIST_FILE_NAMES.MOVE_DETECTED)) {
-            local file = _sffs.open(PERSIST_FILE_NAMES.MOVE_DETECTED, "r");
-            local move = file.read();
-            file.close();
-            move.seek(0, 'b');
-            moveDetected = (move.readn('b') == 1);
-        } else {
-            // Movement is only stored when an event has happened. If no file 
-            // has been stored, then no movement event has happened.
-            moveDetected = false;
-        }
-
-        return moveDetected;
-    }
-
-    function setMoveDetected(detected) {
-        // Only update if movement flag has changed
-        if (moveDetected == detected) return;
-
-        // Erase outdated movement data
-        if (_sffs.fileExists(PERSIST_FILE_NAMES.MOVE_DETECTED)) {
-            _sffs.eraseFile(PERSIST_FILE_NAMES.MOVE_DETECTED)
-        }
-
-        // Update local and stored wake time with the new time
-        moveDetected = detected;
-        local file = _sffs.open(PERSIST_FILE_NAMES.MOVE_DETECTED, "w");
-        file.write(_serializeMove(moveDetected));
-        file.close();
-        ::debug("Movement flag stored: " + moveDetected);
-    }
-
-    function setWakeTime(newTime) {
-        // Only update if timestamp has changed
-        if (wakeTime == newTime) return;
-
-        // Erase outdated wake time
-        if (_sffs.fileExists(PERSIST_FILE_NAMES.WAKE_TIME)) {
-            _sffs.eraseFile(PERSIST_FILE_NAMES.WAKE_TIME)
-        }
-
-        // Update local and stored wake time with the new time
-        wakeTime = newTime;
-        local file = _sffs.open(PERSIST_FILE_NAMES.WAKE_TIME, "w");
-        file.write(_serializeTimestamp(wakeTime));
-        file.close();
-        ::debug("Wake time stored: " + wakeTime);
-    }
-
     function setReportTime(newTime) {
         // Only update if timestamp has changed
-        if (reportTime == newTime) return;
+        if (reportTime == newTime) return false;
 
         // Erase outdated report time
         if (_sffs.fileExists(PERSIST_FILE_NAMES.REPORT_TIME)) {
@@ -151,7 +116,62 @@ class Persist {
         local file = _sffs.open(PERSIST_FILE_NAMES.REPORT_TIME, "w");
         file.write(_serializeTimestamp(reportTime));
         file.close();
-        ::debug("Report time stored: " + reportTime);
+        ::debug("[Persist] Report time stored: " + reportTime);
+        return true;
+    }
+
+    function getAlerts() {
+        if (alerts != null) return alerts;
+
+        // Try to get alerts from SPI, store a local copy
+        if (_sffs.fileExists(PERSIST_FILE_NAMES.ALERTS)) {
+            local file = _sffs.open(PERSIST_FILE_NAMES.ALERTS, "r");
+            local alrts = file.read();
+            file.close();
+            alrts.seek(0, 'b');
+            alerts = alrts.readn('b');
+        }
+        
+        // If no alerts are stored, then set local copy to none (no need to store this)
+        if (alerts == null) alerts = ALERT_TYPE.NONE;
+
+        // Return alerts
+        return alerts;
+    }
+
+    function setAlerts(newAlerts) {
+        // Only upate if alerts have changed
+        if (alerts == newAlerts) return false;
+
+        // Erase outdated alerts
+        if (_sffs.fileExists(PERSIST_FILE_NAMES.ALERTS)) {
+            _sffs.eraseFile(PERSIST_FILE_NAMES.ALERTS)
+        }
+
+        // Update local and stored alerts with the new alerts
+        alerts = newAlerts;
+        local file = _sffs.open(PERSIST_FILE_NAMES.ALERTS, "w");
+        file.write(_serializeByte(alerts));
+        file.close();
+
+        ::debug(format("[Persist] Alerts stored: 0x%02X", alerts));
+        return true;
+    }
+
+    function getAlert(type) {
+        // Make sure we have alerts stored locally
+        getAlerts();
+        // Return the integer (enum) value of the specified alert 
+        return (type & alerts);
+    }
+
+    function setAlert(type, detected) {
+        // Make sure we have alerts stored locally
+        getAlerts();
+        // Toggle alert if needed
+        local newAlerts = (detected) ? (type | alerts) : (~type & alerts);
+        // Set alerts if needed
+        return setAlerts(newAlerts);
     }
 
     function _serializeTimestamp(ts) {
@@ -161,10 +181,9 @@ class Persist {
         return b;
     }
 
-    function _serializeMove(detected) {
+    function _serializeByte(byte) {
         local b = blob(1);
-        local int = (detected) ? 1 : 0;
-        b.writen(int, 'b');
+        b.writen(byte, 'b');
         b.seek(0, 'b');
         return b;
     }

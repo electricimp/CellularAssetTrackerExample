@@ -42,7 +42,7 @@ class Motion {
     }
 
     function enable(threshold, onInterrupt = null) {
-        ::debug("Enabling motion detection");
+        ::debug("[Motion] Enabling motion detection");
 
         configIntWake(onInterrupt);
         
@@ -70,7 +70,7 @@ class Motion {
 
     // This method does NOT clear the latched interrupt pin. It disables the accelerometer and reconfigures wake pin.  
     function disable() {
-        ::debug("Disabling motion detection");
+        ::debug("[Motion] Disabling motion detection");
 
         // Disables accelerometer 
         accel.setDataRate(0);
@@ -90,11 +90,68 @@ class Motion {
     // Returns boolean if interrupt was detected. 
     // Note: Calling this method clears the interrupt.
     function detected() {
-        ::debug("Checking and clearing interrupt");
+        ::debug("[Motion] Checking and clearing interrupt");
         // Get interrupt table. Note this clears the interrupt data 
         local res = accel.getInterruptTable();
         // Return boolean - if motion event has occurred
         return res.int1;
+    }
+
+    function getAccelReading(cb) {
+        if (_isAccelEnabled()) {
+            local r = accel.getAccel();
+            if ("error" in r) {
+                ::error("[Motion] Error reading accel " + r.error);
+                cb(null);
+            } else {
+                cb(r);
+            }
+        } else {
+            // Enable accel
+            accel.setDataRate(ACCEL_DATA_RATE);
+            accel.enable(true);
+            // Give time for at least one reading to happen
+            local odr = 1.0 / ACCEL_DATA_RATE;
+            imp.wakeup(odr, function() {
+                local r = accel.getAccel();
+                // Disable accel
+                accel.setDataRate(0);
+                accel.enable(false);
+                if ("error" in r) {
+                    ::error("[Motion] Error reading accel " + r.error);
+                    cb(null);
+                } else {
+                    cb(r);
+                }
+            }.bindenv(this));
+        }
+    }
+
+    function getMagnitude(data) {
+        if (data == null) return null;
+
+        if ("x" in data && "y" in data && "z" in data) {
+            local x = data.x;
+            local y = data.y;
+            local z = data.z;
+            return math.sqrt(x*x + y*y + z*z);
+        }
+        
+        return null;
+    }
+
+    // Helper returns bool if accel is enabled
+    function _isAccelEnabled() {
+        // bits 0-2 xyz enabled, 3 low-power enabled, 4-7 data rate
+        local val = accel._getReg(LIS3DH_CTRL_REG1);
+        return (val & 0x07) ? true : false;
+    }
+
+    // Helper returns bool if accel inertial interrupt is enabled
+    function _isAccelIntEnabled() {
+        // bit 7 inertial interrupt is enabled,
+        local val = accel._getReg(LIS3DH_CTRL_REG3);
+        return (val & 0x40) ? true : false;
     }
 
 }

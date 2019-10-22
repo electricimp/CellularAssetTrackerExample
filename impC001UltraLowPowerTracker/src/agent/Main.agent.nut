@@ -25,7 +25,8 @@
 // Agent Main Application File
 
 // Libraries 
-#require "MessageManager.lib.nut:2.4.0"
+#require "Messenger.lib.nut:0.1.0"
+#require "GoogleMaps.agent.lib.nut:1.0.1" 
 #require "UBloxAssistNow.agent.lib.nut:1.0.0"
 // TODO: ADD YOUR CLOUD SERVICE LIBRARY HERE
 
@@ -39,73 +40,153 @@
 // Main Application
 // -----------------------------------------------------------------------
 
+// Max time to wait for agent/device message ack
+const MSG_ACK_TIMEOUT = 10;
+
 class MainController {
     
     loc   = null;
-    mm    = null;
+    msgr  = null;
     cloud = null;
 
     constructor() {
         // Initialize Logger 
         Logger.init(LOG_LEVEL.DEBUG);
 
-        ::debug("Agent started...");
+        ::debug("[Main] Agent started...");
 
         // Initialize Assist Now Location Helper
         loc = Location();
 
-        // Initialize Message Manager
-        mm = MessageManager();
+        // Initialize Messenger for agent/device communication 
+        // Defaults: message ackTimeout set to 10s, max num msgs 10, default msg ids
+        msgr = Messenger({"ackTimeout" : MSG_ACK_TIMEOUT});
 
         // Open listeners for messages from device
-        mm.on(MM_REPORT, processReport.bindenv(this));
-        mm.on(MM_ASSIST, getAssist.bindenv(this));
+        msgr.on(MSG_REPORT, processReport.bindenv(this));
+        msgr.on(MSG_ASSIST, getAssist.bindenv(this));
 
         // Initialize Cloud Service
         // NOTE: Cloud service class is empty and will initialize an empty framework 
         cloud = Cloud();
     }
 
-    function processReport(msg, reply) {
-        local report = msg.data;
+    function processReport(payload, customAck) {
+        local report = payload.data;
 
-        ::debug("Recieved status update from devcie: ");
-        ::debug(http.jsonencode(report));
-        // Report Structure (movement, fix and battStatus only included if data was collected)
-            // { 
-            //     "fix" : {                            // Only included if fix was obtained
-            //         "accuracy": 9.3620005,           // fix accuracy
-            //         "secToFix": 36.978001,           // sec from boot til accurate fix 
-            //         "lat": "37.3957215",             // latitude
-            //         "numSats": 10,                   // number of satellites used in fix
-            //         "lon": "-122.1022552",           // longitude
-            //         "fixType": 3,                    // type of fix
-            //         "secTo1stFix": 9.1499996,        // ms from boot til first fix (not accurate)
-            //         "time": "2019-03-01T19:10:32Z"   // time from GPS message
-            //     }, 
-            //     "battStatus": {                      // Only included if info returned from fuel gauge
-            //         "percent": 85.53125, 
-            //         "capacity": 2064 
-            //     }, 
-            //     "ts": 1551467430,                    // Always included, timestamp when report sent
-            //     "secSinceBoot": 55.665001,           // Always included
-            //     "movement" : true                    // Always included
-            // }
+        // Ack report immediately
+        local ack = customAck();
+        ack();
 
+        if (!("fix" in report) && "cellInfo" in report) {
+            // Use cell info from device to get location from 
+            // Google maps API
+            local cellStatus = loc.parseCellInfo(report.cellInfo);
+            if ("cellid" in cellStatus) {
+                loc.getLocCellInfo(cellStatus, function(location) {
+                    if (location != null) {
+                        report.cellInfoLoc <- location;
+                    }
+
+                    // Log status report from device
+                    printReportData(report);
+                    // Send device data to cloud service
+                    cloud.send(report);
+                }.bindenv(this));
+                
+                // Let cell location response trigger report send to cloud 
+                return;
+            }
+        } 
+
+        // Log status report from device
+        printReportData(report);
         // Send device data to cloud service
-        // NOTE: Cloud service send is an empty function
         cloud.send(report);
     }
 
-    function getAssist(msg, reply) {
-        ::debug("Requesting online assist messages from u-blox webservice");
-        loc.getOnlineAssist(function(assistMsgs) {
-            ::debug("Received online assist messages from u-blox webservice");
-            if (assistMsgs != null) {
-                ::debug("Sending device online assist messages");
-                reply(assistMsgs);
+    function getAssist(payload, customAck) {
+        local reply = customAck();
+        local type = payload.data
+        if (type == null) ASSIST_TYPE.ONLINE;
+
+        switch (type) {
+            case ASSIST_TYPE.OFFLINE:
+                ::debug("[Main] Requesting offline assist messages from u-blox webservice");
+                loc.getOfflineAssist(function(assistMsgs) {
+                    ::debug("[Main] Received online assist messages from u-blox webservice");
+                    if (assistMsgs != null) {
+                        ::debug("[Main] Sending device offline assist messages");
+                        reply(assistMsgs);
+                    }
+                }.bindenv(this))
+                break;
+            case ASSIST_TYPE.ONLINE:
+                ::debug("[Main] Requesting online assist messages from u-blox webservice");
+                loc.getOnlineAssist(function(assistMsgs) {
+                    ::debug("[Main] Received online assist messages from u-blox webservice");
+                    if (assistMsgs != null) {
+                        ::debug("[Main] Sending device online assist messages");
+                        reply(assistMsgs);
+                    }
+                }.bindenv(this))
+                break;
+            default: 
+                ::error("[Main] Unknown assist request from device: " + payload.data);
+        }
+    }
+
+    function printReportData(report) {
+        ::debug("[Main] Recieved status update from device:");
+        ::debug("--------------------------------------------------------------");
+        ::debug("[Main] Raw report: ");
+        ::debug(http.jsonencode(report));
+
+        if ("ts" in report) ::debug("[Main] Report created at: " + formatDate(report.ts));
+        if ("secSinceBoot" in report) ::debug("[Main] Report sent " + report.secSinceBoot + "s after device booted");
+
+        ::debug("[Main] Telemetry details: ");
+        if ("magnitude" in report)   ::debug("[Main]   Magnitude: "     + report.magnitude   + " Gs");
+        if ("accel" in report)       ::debug("[Main]   Accelerometer: " + http.jsonencode(report.accel));
+        if ("temperature" in report) ::debug("[Main]   Temperature: "   + report.temperature + "°C");
+        if ("humidity" in report)    ::debug("[Main]   Humidity: "      + report.humidity    + "%");
+
+        
+        if ("battStatus" in report) { 
+            local status = report.battStatus;
+            ::debug("[Main] Battery Status details:");
+            if ("capacity" in status) ::debug("[Main]   Remaining battery capacity: " + status.capacity + " mAh");
+            if ("percent" in status)  ::debug("[Main]   Remaining battery " + status.percent + "%");
+        }
+
+        if ("fix" in report) {
+            local fix = report.fix;
+            ::debug("[Main] Location fix details: ");
+            ::debug("[Main]   Fix time " + fix.time);
+            ::debug("[Main]   Seconds to first fix: " + fix.secTo1stFix);
+            ::debug("[Main]   Seconds to accurate fix: " + fix.secToFix);
+            ::debug("[Main]   Fix type: " + getFixDescription(fix.fixType));
+            ::debug("[Main]   Fix accuracy: " + fix.accuracy + " meters");
+            ::debug("[Main]   Latitude: " + fix.lat + ", Longitude: " + fix.lon);
+        }
+
+        if ("cellInfo" in report) {
+            ::debug("[Main] Location cell info details: ");
+            ::debug("[Main]   Location data not available. Cell info: " + report.cellInfo);
+            if ("cellInfoLoc" in report) {
+                local loc = report.cellInfoLoc;
+                ::debug("[Main]   Fix accuracy: " + loc.accuracy + " meters");
+                ::debug("[Main]   Latitude: " + loc.lat + ", Longitude: " + loc.lon);
             }
-        }.bindenv(this))
+        }
+
+        if ("movement" in report) ::debug("[Main] Movement detected: " + report.movement);
+        ::debug("--------------------------------------------------------------");
+    }
+
+    function formatDate(t = null) {
+        local d = (t == null) ? date() : date(t);
+        return format("%04d-%02d-%02d %02d:%02d:%02d", d.year, (d.month+1), d.day, d.hour, d.min, d.sec);
     }
 
     function getFixDescription(fixType) {

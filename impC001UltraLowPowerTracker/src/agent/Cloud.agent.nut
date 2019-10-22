@@ -24,14 +24,19 @@
 
  // Cloud Service File 
 
- // Manages Cloud Service Communications  
+// Manages Cloud Service Communications  
 // Dependencies: YOUR CLOUD SERVICE LIBRARY 
 // Initializes: YOUR CLOUD SERVICE LIBRARY
 class Cloud {
 
     _service = null;
+    _devId     = null; 
+    _agentId   = null;
 
     constructor() {
+        _devId   = imp.configparams.deviceid; 
+        _agentId = split(http.agenturl(), "/").top();
+
         // TODO: initalize your cloud service and connect/register device etc.
     }
 
@@ -40,4 +45,8 @@ class Cloud {
         // TODO: send formatted data to your cloud service
     }
 
+    function _formatData(data) {
+        // TODO: Create function that parses report from device and creates table formatted for webservice
+    }
+    
 }

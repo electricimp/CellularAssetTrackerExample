@@ -22,31 +22,32 @@
 // ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 // OTHER DEALINGS IN THE SOFTWARE.
 
-// Shared Agent/Device constants
+// Environmental Monitoring File
 
-// Messaging Names
-const MSG_ASSIST = "assist";
-const MSG_REPORT = "report";
+// Manages Environmental Monitoring  
+// Dependencies: HTS221 (may configure sensor i2c)
+// Initializes: HTS221
+class Env {
 
-// Assist Now Shared Message Types
-enum ASSIST_TYPE {
-    OFFLINE,
-    ONLINE
-}
+    th = null;
 
-// Alert Type Values
-enum ALERT_TYPE {
-    NONE       = 0x00,
-    MOVEMENT   = 0x01,
-    BATT_LOW   = 0x02,
-    TEMP_HIGH  = 0x04,
-    HUMID_HIGH = 0x08
-}
+    constructor(configureI2C = null) {
+        if (configureI2C) SENSOR_I2C.configure(CLOCK_SPEED_400_KHZ);
+        th = HTS221(SENSOR_I2C, TEMP_HUMID_ADDR);
+    }
 
-// Alert Type Reported
-enum ALERT_TYPE_REPORTED {
-    MOVEMENT   = 0x10,
-    BATT_LOW   = 0x20,
-    TEMP_HIGH  = 0x40,
-    HUMID_HIGH = 0x80
+    // Takes a reading and passes result to callback 
+    function getTempHumid(cb) {
+        th.setMode(HTS221_MODE.ONE_SHOT);
+        // Trigger callback when we get a reading.
+        th.read(function(res) {
+            if ("error" in res) {
+                ::error("[Env] Temperature/Humidity reading error: " + res.error);
+                cb(null);
+            } else {
+                cb(res);
+            }
+        }.bindenv(this))
+    }
+    
 }
