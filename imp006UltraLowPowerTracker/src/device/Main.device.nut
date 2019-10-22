@@ -462,7 +462,7 @@ class MainController {
             loc.getLocation(LOCATION_ACCURACY, function(gpsFix) {
                 ::debug("[Main] GPS finished location request...");
                 cancelLocTimeout();
-                ("error" in gpsFix) ? resolve(null) : resolve(gpsFix);
+                return ("error" in gpsFix) ? resolve(null) : resolve(gpsFix);
             }.bindenv(this));
         }.bindenv(this));
     }
