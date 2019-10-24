@@ -534,12 +534,12 @@ class MainController {
             "ts"           : time()
         }
 
-        if (battStatus != null)   report.battStatus <- battStatus;
+        if (battStatus != null) report.battStatus <- battStatus;
         if (accelReading != null) {
             report.accel     <- accelReading;
             report.magnitude <- accelReading.mag;
         }
-        if (alerts != null)       report.alerts     <- alerts;
+        if (alerts != null) report.alerts     <- alerts;
 
         if (envReadings != null) {
             report.temperature <- envReadings.temperature;

@@ -45,6 +45,7 @@ enum ALERT_TYPE {
 
 // Alert Type Reported
 enum ALERT_TYPE_REPORTED {
+    NONE       = 0x00, 
     MOVEMENT   = 0x10,
     BATT_LOW   = 0x20,
     TEMP_HIGH  = 0x40,
