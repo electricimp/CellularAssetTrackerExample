@@ -76,9 +76,9 @@ const MOVEMENT_THRESHOLD       = 0.05;
 // Low battery alert threshold in percentage
 const BATTERY_THRESH_LOW       = 10;
 // Temperature above alert threshold in deg C will trigger alert
-const TEMP_THRESHOLD_HIGH      = 30;
+const TEMP_THRESHOLD_HIGH      = 27;
 // Humidity above alert threshold will trigger alert
-const HUMID_THRESHOLD_HIGH     = 90;
+const HUMID_THRESHOLD_HIGH     = 50;
 
 // Constant used to validate imp's timestamp
 const VALID_TS_YEAR            = 2019;
@@ -374,8 +374,6 @@ class MainController {
                     }
                     if (reading != null) {
                         ::debug(format("[Main] Current Humidity: %0.2f %s, Current Temperature: %0.2f °C", reading.humidity, "%", reading.temperature));
-                        // Update alerts if needed
-                        storeEnvAlerts(reading);
                     }
                     ::debug("--------------------------------------------------------------------------");
                     return resolve(reading);
@@ -402,9 +400,6 @@ class MainController {
                     ::debug("[Main] Remaining cell capacity: " + status.capacity + "mAh");
                     ::debug("[Main] Percent of battery remaining: " + status.percent + "%");
                     ::debug("--------------------------------------------------------------------------");
-
-                    // Update alerts if needed
-                    storeBattAlert(status);
                 }
                 return resolve(status);
             }.bindenv(this));
@@ -482,6 +477,9 @@ class MainController {
         local accelReading  = taskValues[2];
         local batteryStatus = taskValues[3];
 
+        // Checks reading values for alert conditions, and stores new alerts if needed
+        updateAlerts(envReadings, batteryStatus);
+
         // Send report
         ::debug("[Main] Creating report");
         local report = createReport(persist.getAlerts(), envReadings, batteryStatus, accelReading, gpsFix);
@@ -492,20 +490,30 @@ class MainController {
         ::debug("[Main] Reading Tasks completed");
         // Collect reading values
         local envReadings   = taskValues[0];
-        local batteryStatus = taskValues[1];
+        local batteryStatus = taskValues[1];       
 
-        // Check for alerts
-        if (haveUnreportedAlerts()) {
+        // Check if we should connect now
+        // updateAlerts: checks reading values for alert conditions, and stores new alerts 
+        // if needed, Returns boolean: if an alert condition has been cleared after it has
+        // been previously reported
+        // haveUnreportedAlerts: checks for any unreported alert conditions
+        if (updateAlerts(envReadings, batteryStatus) || haveUnreportedAlerts()) {
             ::debug("[Main] Have conditions to report...");
 
-            // Get location and accel reading then report
+            // Start connecting, so we can send report
             cm.connect();
+
+            // Reset max wake timer, so we have a chance to can get a location
+            setMaxWakeTimeout();
+            
+            // Get location and accelerometer reading then send report
             local tasks2 = [getLocation(), getAccelReading()];
             Promise.all(tasks2).then(function(task2Values) {
+                ::debug("[Main] Finished getting location, creating and sending report...");
                 // Send report
-                local report = createReport(alerts, envReadings, batteryStatus, task2Values[1], task2Values[0]);
+                local report = createReport(persist.getAlerts(), envReadings, batteryStatus, task2Values[1], task2Values[0]);
                 sendReport(report);
-            }.bindenv(this))
+            }.bindenv(this), onTasksFail.bindenv(this))
         } else {
             ::debug("[Main] No conditions to report, powering down.");
             powerDown();
@@ -686,38 +694,6 @@ class MainController {
     // Helpers
     // -------------------------------------------------------------
 
-    function storeEnvAlerts(reading) {
-        local alerts       = persist.getAlerts();
-        local newAlerts    = alerts;
-        local tempInRange  = reading.temperature >= TEMP_THRESHOLD_HIGH;
-        local humidInRange = reading.humidity >= HUMID_THRESHOLD_HIGH;
-
-        // Clear reported flag if needed
-        if (tempInRange && (ALERT_TYPE_REPORTED.TEMP_HIGH & alerts)) newAlerts = ~ALERT_TYPE_REPORTED.TEMP_HIGH | newAlerts;
-        if (humidInRange && (ALERT_TYPE_REPORTED.HUMID_HIGH & alerts)) newAlerts = ~ALERT_TYPE_REPORTED.HUMID_HIGH | newAlerts;
-
-        // Update alerts based on new reading
-        newAlerts = (tempInRange) ? (ALERT_TYPE.TEMP_HIGH | newAlerts) : (~ALERT_TYPE.TEMP_HIGH & newAlerts);
-        newAlerts = (humidInRange) ? (ALERT_TYPE.HUMID_HIGH | newAlerts) : (~ALERT_TYPE.HUMID_HIGH & newAlerts);
-        
-        // Store alert state for env readings
-        persist.setAlerts(newAlerts);
-    }
-
-    function storeBattAlert(status) {
-        local alerts    = persist.getAlerts();
-        local newAlerts = alerts;
-        local inRange   = status.percent <= BATTERY_THRESH_LOW;
-
-        // Clear reported flag if needed
-        if (inRange && (ALERT_TYPE_REPORTED.BATT_LOW & alerts)) newAlerts = ~ALERT_TYPE_REPORTED.BATT_LOW | newAlerts;
-        // Update alert based on new battery status
-        newAlerts = (inRange) ? (ALERT_TYPE.BATT_LOW | newAlerts) : (~ALERT_TYPE.BATT_LOW & newAlerts);
-
-        // Store alert state for env readings
-        persist.setAlerts(newAlerts);
-    }
-
     function shouldGetAssist() {
         if (loc == null) loc = Location(bootTime);
         return !loc.assistIsValid();
@@ -746,6 +722,53 @@ class MainController {
         local shouldReport = (now >= persist.getReportTime());
         ::debug("Time to send report: " + shouldReport);
         return shouldReport;
+    }
+
+    function updateAlerts(envReading, battStatus) {
+        local alerts       = persist.getAlerts();
+        local newAlerts    = alerts;
+        local alertCleared = false;
+
+        if (envReading != null && "temperature" in envReading) {
+            local tempInRange = envReading.temperature < TEMP_THRESHOLD_HIGH;
+            ::debug("[Main] Temperature HIGH alert condition: " + (!tempInRange));
+            // Clear reported flag if needed
+            if (tempInRange && (ALERT_TYPE_REPORTED.TEMP_HIGH & alerts)) {
+                ::debug("[Main] Temperature HIGH alert condition cleared");
+                newAlerts = ~ALERT_TYPE_REPORTED.TEMP_HIGH & newAlerts;
+                alertCleared = true;
+            }
+            // Update alerts based on new reading
+            newAlerts = (!tempInRange) ? (ALERT_TYPE.TEMP_HIGH | newAlerts) : (~ALERT_TYPE.TEMP_HIGH & newAlerts);
+        }
+        if (envReading != null && "humidity" in envReading) {
+            local humidInRange = envReading.humidity < HUMID_THRESHOLD_HIGH;
+            ::debug("[Main] Humidity HIGH alert condition: " + (!humidInRange));
+            // Clear reported flag if needed
+            if (humidInRange && (ALERT_TYPE_REPORTED.HUMID_HIGH & alerts)) {
+                ::debug("[Main] Humidity HIGH alert condition cleared");
+                newAlerts = ~ALERT_TYPE_REPORTED.HUMID_HIGH & newAlerts;
+                alertCleared = true;
+            }
+            // Update alerts based on new reading
+            newAlerts = (!humidInRange) ? (ALERT_TYPE.HUMID_HIGH | newAlerts) : (~ALERT_TYPE.HUMID_HIGH & newAlerts);
+        }
+        if (battStatus != null && "percent" in battStatus) {
+            local battInRange = battStatus.percent > BATTERY_THRESH_LOW;
+            ::debug("[Main] Battery LOW alert condition: " + (!battInRange));
+            // Clear reported flag if needed
+            if (battInRange && (ALERT_TYPE_REPORTED.BATT_LOW & alerts)) {
+                ::debug("[Main] Battery LOW alert condition cleared");
+                newAlerts = ~ALERT_TYPE_REPORTED.BATT_LOW & newAlerts;
+                alertCleared = true;
+            }
+            // Update alert based on new battery status
+            newAlerts = (!battInRange) ? (ALERT_TYPE.BATT_LOW | newAlerts) : (~ALERT_TYPE.BATT_LOW & newAlerts);
+        }
+
+        // Store alert state for env readings
+        persist.setAlerts(newAlerts);
+        return alertCleared;
     }
 
     function haveUnreportedAlerts() {

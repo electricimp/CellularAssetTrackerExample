@@ -125,7 +125,9 @@ class Location {
     }
 
     function getLocation(accuracy, onAccurateFix) {
+        ::debug("[Location] Location request started. Enabling GNSS...");
         enableGNSS(accuracy, function() {
+            ::debug("[Location] Polling for GPS fix accurate to at least " + accuracy + " M");
             _pollLoc(onAccurateFix);
         }.bindenv(this))
     }
@@ -179,10 +181,11 @@ class Location {
         if (!_isGNSSEnabled()) {
             local resp = _writeAndParseAT(format(AT_COMMAND.TURN_ON_GNSS, fixAccuracy, LOC_POLLING_TIME_SEC));
             if ("error" in resp) {
-                ::debug("[Location] Error enabling GNSS: " + resp.error);
                 if (resp.error == AT_ERROR_CODE.MODEM_NOT_READY) {
                     // Power up modem (GPS)
                     netOpen = imp.net.open({"interface": "cell0"});
+                } else {
+                    ::error("[Location] Error enabling GNSS: " + resp.error);
                 }
                 imp.wakeup(LOC_POLLING_TIME_SEC, function() {
                     enableGNSS(fixAccuracy, onEnabled);
@@ -216,7 +219,7 @@ class Location {
     function _isGNSSEnabled() {
         local resp = _writeAndParseAT(AT_COMMAND.GET_GNSS_STATE);
         if ("error" in resp) {
-            ::error("[Location] Received AT error code: " + resp.error);
+            // ::debug("[Location] Received AT error code: " + resp.error);
             return false;
         }
         // Response 
