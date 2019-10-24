@@ -457,7 +457,22 @@ class MainController {
                 ::debug("[Main] Disabling GPS power");
                 PWR_GATE_EN.write(0);
 
-                return ("error" in gpsFix) ? resolve(null) : resolve(gpsFix);
+                if (gpsFix == null) {
+                    ::debug("[Main] Location request timed out");
+                    local lastFix = loc.gpsFix;
+                    // If GPS got a fix of any sort
+                    if (lastFix != null) {
+                        // Log the fix summery
+                        ::debug(format("[Main] Most recent fix data - fixType: %s, numSats: %s, accuracy: %s", lastFix.fixType.tostring(), lastFix.numSats.tostring(), lastFix.accuracy.tostring()));
+                        // Add to report if fix was within the reporting accuracy
+                        if (lastFix.accuracy <= LOCATION_REPORT_ACCURACY) {
+                            ::dubug("Using latest fix for report");
+                            gpsFix = lastFix;
+                        }
+                    }
+                }
+
+                return resolve(gpsFix);
             }.bindenv(this));
         }.bindenv(this));
     }
@@ -561,15 +576,6 @@ class MainController {
 
         if (gpsFix != null) {
             report.fix <- gpsFix;
-        } else {
-            local mostAccFix = loc.gpsFix;
-            // If GPS got a fix of any sort
-            if (mostAccFix != null) {
-                // Log the fix summery
-                ::debug(format("[Main] fixType: %s, numSats: %s, accuracy: %s", mostAccFix.fixType.tostring(), mostAccFix.numSats.tostring(), mostAccFix.accuracy.tostring()));
-                // Add to report if fix was within the reporting accuracy
-                if (mostAccFix.accuracy <= LOCATION_REPORT_ACCURACY) report.fix <- mostAccFix;
-            }
         }
 
         return report;
