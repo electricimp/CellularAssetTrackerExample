@@ -29,6 +29,7 @@ const MSG_ASSIST = "assist";
 const MSG_REPORT = "report";
 
 // Alert Type Values
+// NOTE: These values should correspond to ALERT_TYPE_REPORTED
 enum ALERT_TYPE {
     NONE       = 0x00,
     MOVEMENT   = 0x01,
@@ -38,7 +39,9 @@ enum ALERT_TYPE {
 }
 
 // Alert Type Reported
+// NOTE: These values should correspond to ALERT_TYPE_REPORTED
 enum ALERT_TYPE_REPORTED {
+    NONE       = 0x00,    
     MOVEMENT   = 0x10,
     BATT_LOW   = 0x20,
     TEMP_HIGH  = 0x40,

@@ -97,14 +97,14 @@ Logger <- {
         } else {
             if (_isConnected()) {
                 (err) ? server.error(msg) : server.log(msg);
-            }
+            } 
             if (uartLoggingConfigured) {
                 local d = date();
                 local ts = format("%04d-%02d-%02d %02d:%02d:%02d", d.year, d.month+1, d.day, d.hour, d.min, d.sec);
                 LOGGING_UART.write(ts + " " + msg + "\n\r");
             }
         }
-    },
+    } 
 }
 
 // Global logging functions

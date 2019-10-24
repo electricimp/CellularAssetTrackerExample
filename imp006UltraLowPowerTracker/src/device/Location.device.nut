@@ -74,7 +74,8 @@ enum AT_ERROR_CODE {
     GPS_END_BY_E911                 = "515",
     GPS_NO_FIX_NOW                  = "516",
     GPS_GEO_FENCE_ID_DOES_NOT_EXIST = "517",
-    GPS_UNKNOWN_ERROR               = "549"
+    GPS_UNKNOWN_ERROR               = "549",
+    MODEM_NOT_READY                 = "Modem not ready"
 }
 
 enum AT_COMMAND {
@@ -115,11 +116,8 @@ const LOC_POLLING_TIME_SEC = 1;
 // Dependencies: imp006 GPS
 // Initializes: None
 class Location {
-    
-    gpsFix     = null;
-    // accTarget  = null;
-    // onAccFix   = null;
 
+    netOpen    = null;    
     bootTime   = null;
 
     constructor(_bootTime) {
@@ -127,8 +125,9 @@ class Location {
     }
 
     function getLocation(accuracy, onAccurateFix) {
-        enableGNSS(accuracy);
-        _pollLoc(onAccurateFix);
+        enableGNSS(accuracy, function() {
+            _pollLoc(onAccurateFix);
+        }.bindenv(this))
     }
 
     function assistIsValid() {
@@ -175,28 +174,43 @@ class Location {
             // AT_COMMAND.TURN_ON_GNSS
     }
 
-    function enableGNSS(fixAccuracy) {
+    function enableGNSS(fixAccuracy, onEnabled) {
+        // While modem is connecting
         if (!_isGNSSEnabled()) {
             local resp = _writeAndParseAT(format(AT_COMMAND.TURN_ON_GNSS, fixAccuracy, LOC_POLLING_TIME_SEC));
             if ("error" in resp) {
-                ::error("[Location] Error enabling GNSS: " + resp.error);
-                return false;
+                ::debug("[Location] Error enabling GNSS: " + resp.error);
+                if (resp.error == AT_ERROR_CODE.MODEM_NOT_READY) {
+                    // Power up modem (GPS)
+                    netOpen = imp.net.open({"interface": "cell0"});
+                }
+                imp.wakeup(LOC_POLLING_TIME_SEC, function() {
+                    enableGNSS(fixAccuracy, onEnabled);
+                }.bindenv(this))
+            } else {
+                onEnabled();
             }
-            return resp.success;
+        } else {
+            onEnabled();
         }
-        return true;
     }
 
-    function disableGNSS() {
+    function disableGNSS(resetNetOpen = false) {
         if (_isGNSSEnabled()) {
             local resp = _writeAndParseAT(AT_COMMAND.TURN_OFF_GNSS);
             if ("error" in resp) {
                 ::error("[Location] Error disabling GNSS: " + resp.error);
                 return false;
             }
+            resetNetOpenObject();
             return resp.success;
         }
+        resetNetOpenObject();
         return true;
+    }
+
+    function resetNetOpenObject() {
+        netOpen = null;
     }
 
     function _isGNSSEnabled() {
@@ -212,6 +226,8 @@ class Location {
     }
 
     function _pollLoc(onLoc) {
+        // NOTE: If modem (and GPS) are not powered this will return a timeout 
+        // error immediately
         local fix = _getLoc();
         if (fix) {
             // Pass error or location fix to main application
@@ -232,6 +248,9 @@ class Location {
                 case AT_ERROR_CODE.GPS_NO_FIX_NOW:
                     return null;
                 case AT_ERROR_CODE.GPS_SESSION_NOT_ACTIVE:
+                    // NOTE: Loop in main application powers down modem (and GPS) after set time, 
+                    // so return a timeout error if we get here. Modem (and GPS) must be powered  
+                    // before this loop starts, otherwise we will return this timeout error immediately 
                     ::error("[Location] GPS not enabled.");
                     return {"error" : "Location request timed out"};
                 default: 

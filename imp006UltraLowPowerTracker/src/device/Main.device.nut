@@ -61,18 +61,13 @@ const CHECK_IN_TIME_SEC        = 60;
 // When in production, for long battery life use something 
 // like report weekly: 604800 = 60s * 60m * 24h * 7d
 const REPORT_TIME_SEC          = 1800;
-// Maximum time to stay awake
-const MAX_WAKE_TIME            = 90;
-// PATCH: If GPS assist is not enabled, give more time for first fix after 
-// device boots
-const MAX_FIRST_WAKE_TIME      = 190;
+// Maximum time to stay awake 
+const MAX_WAKE_TIME            = 100;
 
 // Maximum time to wait for GPS to get a fix, before trying to send report
 // NOTE: This should be less than the MAX_WAKE_TIME
-const LOCATION_TIMEOUT_SEC     = 85;
-// PATCH: If GPS assist is not enabled, give more time for first fix after 
-// device boots
-const FIRST_LOC_TIMEOUT_SEC    = 180;
+// NOTE: Set quite high since we cannot write assist packets yet
+const LOCATION_TIMEOUT_SEC     = 90;
 // Accuracy of GPS fix in meters
 const LOCATION_ACCURACY        = 10;
 
@@ -108,7 +103,6 @@ class MainController {
 
     // Flags 
     gettingAssist  = null;
-    longerTimeouts = null;
 
     constructor() {
         // Get boot timestamp
@@ -158,9 +152,6 @@ class MainController {
         msgr = Messenger({"ackTimeout" : MSG_ACK_TIMEOUT});
         msgr.onFail(msgrOnFail.bindenv(this));
         msgr.onAck(msgrOnAck.bindenv(this));
-
-        // Use longer fix/max wake timeouts
-        longerTimeouts = false;
     }
 
     // Msgr handlers
@@ -230,16 +221,8 @@ class MainController {
         // Report successfully sent
         ::debug("[Main] Report ACK received from agent");
 
-        // Movement event reported, clear movement detection flag
-        if (persist.getAlert(ALERT_TYPE.MOVEMENT)) {
-            // Re-enable movement detection
-            move.enable(MOVEMENT_THRESHOLD, onMovement.bindenv(this));
-            // Set stored movement flag to false
-            persist.setAlert(ALERT_TYPE.MOVEMENT, false);
-        }
-
-        // All other alerts remain asserted until condition clears.
-        // TODO: Track alerts/alert reporting
+        // Clear or toggle alert reported flags
+        updateReportedAlerts();
 
         // NOTE: Report values are not persisted, and will be unretrievable when 
         // this function returns
@@ -277,10 +260,6 @@ class MainController {
     // Wake up (not on interrupt or timer) flow
     function onBoot(wakereson) {
         ::debug("[Main] Wake reason: " + lpm.wakeReasonDesc());
-
-        // Use longer timeouts for first fix if we are not using 
-        // assist data
-        longerTimeouts = true;
 
         // Set a limit on how long we are awake for, sets a timer that triggers 
         // powerDown/sleep
@@ -516,16 +495,17 @@ class MainController {
         local batteryStatus = taskValues[1];
 
         // Check for alerts
-        local alerts = persist.getAlerts();
-        if (alerts != ALERT_TYPE.NONE ) {
+        if (haveUnreportedAlerts()) {
             ::debug("[Main] Have conditions to report...");
 
-            // TODO: Track alerts (don't re-send temp/humid/batt alerts)
-            // TODO: Add location to report (this may require staying awake longer)
-
-            // Send report
-            local report = createReport(alerts, envReadings, batteryStatus);
-            sendReport(report);
+            // Get location and accel reading then report
+            cm.connect();
+            local tasks2 = [getLocation(), getAccelReading()];
+            Promise.all(tasks2).then(function(task2Values) {
+                // Send report
+                local report = createReport(alerts, envReadings, batteryStatus, task2Values[1], task2Values[0]);
+                sendReport(report);
+            }.bindenv(this))
         } else {
             ::debug("[Main] No conditions to report, powering down.");
             powerDown();
@@ -667,10 +647,9 @@ class MainController {
     function setLocTimeout() {
         // Ensure only one timer is set
         cancelLocTimeout();
-        // Adjust to longer timeout if getting first fix
-        local sec = (longerTimeouts) ? FIRST_LOC_TIMEOUT_SEC : LOCATION_TIMEOUT_SEC;
+
         // Start a timer to send report if no GPS fix is found
-        gpsFixTimer = imp.wakeup(sec, function() {
+        gpsFixTimer = imp.wakeup(LOCATION_TIMEOUT_SEC, function() {
             ::debug("[Main] GPS failed to get an accurate fix. Disabling GPS power.");
             loc.disableGNSS();
         }.bindenv(this));
@@ -688,10 +667,9 @@ class MainController {
     function setMaxWakeTimeout() {
         // Ensure only one timer is set
         cancelMaxWakeTimeout();
-        // Adjust to longer timeout if getting first fix
-        local sec = (longerTimeouts) ? MAX_FIRST_WAKE_TIME : MAX_WAKE_TIME;
+
         // Start a timer to power down after we have been awake for set time
-        maxWakeTimer = imp.wakeup(sec, function() {
+        maxWakeTimer = imp.wakeup(MAX_WAKE_TIME, function() {
             ::debug("[Main] Wake timer expired. Triggering power down...");
             powerDown();
         }.bindenv(this));
@@ -709,14 +687,35 @@ class MainController {
     // -------------------------------------------------------------
 
     function storeEnvAlerts(reading) {
+        local alerts       = persist.getAlerts();
+        local newAlerts    = alerts;
+        local tempInRange  = reading.temperature >= TEMP_THRESHOLD_HIGH;
+        local humidInRange = reading.humidity >= HUMID_THRESHOLD_HIGH;
+
+        // Clear reported flag if needed
+        if (tempInRange && (ALERT_TYPE_REPORTED.TEMP_HIGH & alerts)) newAlerts = ~ALERT_TYPE_REPORTED.TEMP_HIGH | newAlerts;
+        if (humidInRange && (ALERT_TYPE_REPORTED.HUMID_HIGH & alerts)) newAlerts = ~ALERT_TYPE_REPORTED.HUMID_HIGH | newAlerts;
+
+        // Update alerts based on new reading
+        newAlerts = (tempInRange) ? (ALERT_TYPE.TEMP_HIGH | newAlerts) : (~ALERT_TYPE.TEMP_HIGH & newAlerts);
+        newAlerts = (humidInRange) ? (ALERT_TYPE.HUMID_HIGH | newAlerts) : (~ALERT_TYPE.HUMID_HIGH & newAlerts);
+        
         // Store alert state for env readings
-        persist.setAlert(ALERT_TYPE.TEMP_HIGH, reading.temperature >= TEMP_THRESHOLD_HIGH);
-        persist.setAlert(ALERT_TYPE.HUMID_HIGH, reading.humidity >= HUMID_THRESHOLD_HIGH);
+        persist.setAlerts(newAlerts);
     }
 
     function storeBattAlert(status) {
-        // Store alert state, if battery below expected
-        persist.setAlert(ALERT_TYPE.BATT_LOW, status.percent <= BATTERY_THRESH_LOW);
+        local alerts    = persist.getAlerts();
+        local newAlerts = alerts;
+        local inRange   = status.percent <= BATTERY_THRESH_LOW;
+
+        // Clear reported flag if needed
+        if (inRange && (ALERT_TYPE_REPORTED.BATT_LOW & alerts)) newAlerts = ~ALERT_TYPE_REPORTED.BATT_LOW | newAlerts;
+        // Update alert based on new battery status
+        newAlerts = (inRange) ? (ALERT_TYPE.BATT_LOW | newAlerts) : (~ALERT_TYPE.BATT_LOW & newAlerts);
+
+        // Store alert state for env readings
+        persist.setAlerts(newAlerts);
     }
 
     function shouldGetAssist() {
@@ -729,13 +728,11 @@ class MainController {
         // Check for events
 
         // Note: We are not storing triggering conditions, just an integer 
-        // that identifies the alert condition, movement, temp, humid, battery
-        local alerts = persist.getAlerts();
-        if (alerts != ALERT_TYPE.NONE) {
-            ::debug(format("[Main] Alerts detected: 0x%02X", alerts));
-            // TODO: Track alerts (don't re-send temp/humid/batt alerts)
-            return true;
-        }
+        // that identifies the alert condition, movement, temp, humid, battery,
+        // and if that condition has been reported 
+        local unreportedAlerts = haveUnreportedAlerts();
+        ::debug("Have unreported alerts: " + unreportedAlerts);
+        if (unreportedAlerts) return true;
 
         // Note: We need a valid timestamp to determine sleep times.
         // If the imp looses all power, a connection to the server is
@@ -749,6 +746,47 @@ class MainController {
         local shouldReport = (now >= persist.getReportTime());
         ::debug("Time to send report: " + shouldReport);
         return shouldReport;
+    }
+
+    function haveUnreportedAlerts() {
+        local alerts = persist.getAlerts();
+        local alertsAsserted = alerts & 0x0F;
+        local alertsReported = alerts & 0xF0;
+        
+        if (alertsAsserted == ALERT_TYPE.NONE) {
+            // We have no alerts asserted
+            if (alertsReported) {
+                // TODO: Decide if this condition should triggger a report 
+                // Clear all alerts and reported flags
+                persist.setAlerts(ALERT_TYPE.NONE | ALERT_TYPE_REPORTED.NONE);
+            }
+            return false;
+        }
+
+        ::debug(format("[Main] Alerts detected: 0x%02X, Alerts reported: 0x%02X", alertsAsserted, alertsReported));
+        // Track alerts (don't re-send temp/humid/batt alerts)
+        // Check if any alerts have not been reported
+        local shiftReported = alertsReported >> 4;
+        return (shiftReported & alertsAsserted) != (shiftReported | alertsAsserted);
+    }
+
+    function updateReportedAlerts() {
+        local persistedAlerts = persist.getAlerts();
+        // We don't have any stored alerts, no need to do anything more
+        if (persistedAlerts == ALERT_TYPE.NONE) return;
+        
+        local newAlerts = persistedAlerts;
+        // Movement event reported
+        if (newAlerts & ALERT_TYPE.MOVEMENT) {
+            // Re-enable movement detection
+            move.enable(MOVEMENT_THRESHOLD, onMovement.bindenv(this));
+            // Clear movement detection flag
+            newAlerts = (~ALERT_TYPE.MOVEMENT & newAlerts);
+        }
+
+        // Toggle all other asserted alerts, reported flags
+        newAlerts = newAlerts | ((newAlerts & 0x0F) << 4);
+        persist.setAlerts(newAlerts);
     }
 
 	// Overwrites currently stored wake and report times

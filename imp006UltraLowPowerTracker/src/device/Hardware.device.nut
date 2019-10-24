@@ -52,7 +52,7 @@ BATT_CHGR_ADDR  <- 0xD6;
 FUEL_GAUGE_ADDR <- 0x6C;   
 
 CLICK_SPI       <- hardware.spiEFGH;
-// CLICK_UART      <- hardware.uartXEF;
+CLICK_UART      <- hardware.uartXEFGH;
 CLICK_RESET     <- hardware.pinYH;
 CLICK_INT       <- hardware.pinW;   // NOTE: This is the same as accel int 
 CLICK_PWM       <- hardware.pinXG;
@@ -62,4 +62,4 @@ GROVE_AD1       <- hardware.pinN;
 GROVE_AD2       <- hardware.pinXN;
 
 // Recommended for offline logging, remove when in production    
-// LOGGING_UART    <- hardware.uartDCAB;
+LOGGING_UART    <- hardware.uartXEFGH;
