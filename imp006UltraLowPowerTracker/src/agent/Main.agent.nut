@@ -165,14 +165,15 @@ class MainController {
         }
 
         if ("alerts" in report) {
+            ::debug("[Main] Alert details: ");
             local alerts = report.alerts;
             if (alerts == ALERT_TYPE.NONE) {
-                ::debug("[Main] No alerts detected");
+                ::debug("[Main]   No alerts detected");
             } else {
-                if (alerts & ALERT_TYPE.MOVEMENT)   ::debug("[Main] Movement alert detected");
-                if (alerts & ALERT_TYPE.BATT_LOW)   ::debug("[Main] Low battery alert detected");
-                if (alerts & ALERT_TYPE.TEMP_HIGH)  ::debug("[Main] High temperature alert detected");
-                if (alerts & ALERT_TYPE.HUMID_HIGH) ::debug("[Main] High humidity alert detected");
+                if (alerts & ALERT_TYPE.MOVEMENT)   ::debug("[Main]   Movement alert detected");
+                if (alerts & ALERT_TYPE.BATT_LOW)   ::debug("[Main]   Low battery alert detected");
+                if (alerts & ALERT_TYPE.TEMP_HIGH)  ::debug("[Main]   High temperature alert detected");
+                if (alerts & ALERT_TYPE.HUMID_HIGH) ::debug("[Main]   High humidity alert detected");
             }
         }
         ::debug("--------------------------------------------------------------");

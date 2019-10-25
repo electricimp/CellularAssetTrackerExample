@@ -80,9 +80,9 @@ const MOVEMENT_THRESHOLD       = 0.05;
 // Low battery alert threshold in percentage
 const BATTERY_THRESH_LOW       = 10;
 // Temperature above alert threshold in deg C will trigger alert
-const TEMP_THRESHOLD_HIGH      = 30;
+const TEMP_THRESHOLD_HIGH      = 27;
 // Humidity above alert threshold will trigger alert
-const HUMID_THRESHOLD_HIGH     = 90;
+const HUMID_THRESHOLD_HIGH     = 70;
 
 // Constant used to validate imp's timestamp
 const VALID_TS_YEAR            = 2019;
