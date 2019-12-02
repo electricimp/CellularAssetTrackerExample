@@ -36,6 +36,8 @@
 // Battery Charger/Fuel Gauge Libraries
 #require "MAX17055.device.lib.nut:1.0.1"
 #require "BQ24295.device.lib.nut:1.0.0"
+// GPS Libraries
+#require "GPSParser.device.lib.nut:1.0.0"
 
 // Supporting files
 // NOTE: Order of files matters do NOT change unless you know how it will effect
