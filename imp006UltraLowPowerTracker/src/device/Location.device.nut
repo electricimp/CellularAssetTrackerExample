@@ -54,7 +54,7 @@ class Location {
 
                     local fix = {};
                     if (typeof loc.fix == "table") {
-                        fix = loc.fix;
+                        fix = _parseLatLon(loc.fix);
                         fix.secToFix <- (hardware.millis() - bootTime) / 1000.0;
                     } else {
                         local err = "Error unable to parse location data: " + loc.fix;
@@ -77,6 +77,31 @@ class Location {
     function writeAssistMsgs(msgs, onDone = null) {
         // Cannot do this with AT Command quirk!! Just trigger callback
         onDone("Write assist not supported yet");
+    }
+
+    function _parseLatLon(fix) {
+        // Update latitude if needed
+        if ("lat" in fix) {
+            local lat = fix.lat;
+            local lastCharIdx = lat.len() - 1;
+            local lastChar = lat.slice(lastCharIdx);
+            // If the last char in the string is "N", "S"
+            if (lastChar == "N" || lastChar == "S") {
+                fix.lat = GPSParser.parseLatitude(lat.slice(0, lastCharIdx), lastChar);
+            }
+        }
+        // Update longitude if needed
+        if ("lon" in fix) {
+            local lon = fix.lon;
+            local lastCharIdx = lon.len() - 1;
+            local lastChar = lon.slice(lon.len() - 1);
+            // If the last char in the string is "E", "W"
+            if (lastChar == "E" || lastChar == "W") {
+                fix.lon = GPSParser.parseLongitude(lon.slice(0, lastCharIdx), lastChar);
+            }
+        }
+
+        return fix;
     }
 
 }
