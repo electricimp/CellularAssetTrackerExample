@@ -41,14 +41,19 @@ class Location {
     }
 
     function getLocation(accuracy, onAccurateFix) {
+        local gpsBoot = hardware.millis();
         ::debug("[Location] Location request started. Enabling GNSS...");
         local opts = {
             "accuracy"   : accuracy,
             "locMode"    : BG96_GNSS_LOCATION_MODE.ONE, 
             "onLocation" : function(loc) {
+                // Track
+                local secGPSPowered = (hardware.millis() - gpsBoot) / 1000.0;
                 if ("error" in loc) ::error("[Location] Error getting fix: " + loc.error);
-                
-                if ("fix" in loc) {
+        
+                // NOTE: After power up the BG96 returns stale location data for the first few 
+                // seconds, only process data after a set timeout (3sec is based on observation of data returned)
+                if (secGPSPowered > 3 && "fix" in loc) {
                     local disabled = BG96_GPS.disableGNSS();
                     ::debug("[Location] GPS disabled: " + disabled);
 
